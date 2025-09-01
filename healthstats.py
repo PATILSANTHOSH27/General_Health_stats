@@ -23,10 +23,11 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     parameters = req["queryResult"]["parameters"]
     
-    place = parameters.get("place")
-    disease = parameters.get("disease")
-    indicator = parameters.get("indicator")
-    year = parameters.get("year")
+    place = parameters.get("place") or ""
+    disease = parameters.get("disease") or ""
+    indicator = parameters.get("indicator") or ""
+    year = parameters.get("year") or ""
+
     
     # If year comes as full date, extract year only
     if year:
