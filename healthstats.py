@@ -23,7 +23,7 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     parameters = req["queryResult"]["parameters"]
     
-    place = parameters.get("place") or ""
+    places = parameters.get("places") or ""
     disease = parameters.get("disease") or ""
     indicator = parameters.get("indicator") or ""
     year = parameters.get("year") or ""
@@ -37,20 +37,20 @@ def webhook():
 
     if intent_name == "get_life_expectancy":
         indicator_code = WHO_INDICATOR_MAP.get("life_expectancy")
-        response_text = fetch_who_data(indicator_code, place, year)
+        response_text = fetch_who_data(indicator_code, places, year)
 
     elif intent_name == "get_hiv_cases":
         indicator_code = WHO_INDICATOR_MAP.get("hiv_cases")
-        response_text = fetch_who_data(indicator_code, place, year)
+        response_text = fetch_who_data(indicator_code, places, year)
 
     elif intent_name == "get_tb_deaths":
         indicator_code = WHO_INDICATOR_MAP.get("tb_deaths")
-        response_text = fetch_who_data(indicator_code, place, year)
+        response_text = fetch_who_data(indicator_code, places, year)
 
     elif intent_name == "get_indicator_data":
         if indicator:
             indicator_code = WHO_INDICATOR_MAP.get(indicator)
-            response_text = fetch_who_data(indicator_code, place, year)
+            response_text = fetch_who_data(indicator_code, places, year)
         else:
             response_text = "Sorry, I could not find the indicator."
 
@@ -66,20 +66,20 @@ def webhook():
     return jsonify({"fulfillmentText": response_text})
 
 
-def fetch_who_data(indicator_code, place, year):
-    if not indicator_code or not place or not year:
+def fetch_who_data(indicator_code, places, year):
+    if not indicator_code or not places or not year:
         return "Missing parameters to fetch WHO data."
 
-    url = f"{WHO_API_BASE}{indicator_code}?$filter=SpatialDim eq '{place}' and TimeDim eq {year}"
+    url = f"{WHO_API_BASE}{indicator_code}?$filter=SpatialDim eq '{places}' and TimeDim eq {year}"
     try:
         r = requests.get(url)
         data = r.json()
         if "value" in data and len(data["value"]) > 0:
             result = data["value"][0]
             val = result.get("NumericValue") or result.get("Display")
-            return f"The value for {indicator_code} in {place} for {year} is {val}."
+            return f"The value for {indicator_code} in {places} for {year} is {val}."
         else:
-            return f"No data found for {indicator_code} in {place} for {year}."
+            return f"No data found for {indicator_code} in {places} for {year}."
     except Exception as e:
         return f"Error fetching data: {str(e)}"
 
