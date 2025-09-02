@@ -19,7 +19,9 @@ DISEASE_INDICATOR_MAP = {
     "polio cases": "POLIO_REPORTED_CASES",
     "typhoid cases": "TYPHOID_REPORTED_CASES",
     "yellow fever cases": "YELLOW_FEVER_REPORTED_CASES",
-    "rabies cases": "RABIES_REPORTED_CASES"
+    "rabies cases": "RABIES_REPORTED_CASES",
+    "covid cases": "COVID19_CONFIRMED_CASES",
+    "covid19 cases": "COVID19_CONFIRMED_CASES",
 }
 
 # -----------------------------
