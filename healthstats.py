@@ -11,7 +11,7 @@ ODATA_API_URL = "https://ghoapi.azureedge.net/odata"
 INDICATOR_TO_DISEASE = {
     "death_cases": "covid",
     "confirmed_cases": "covid",
-    "mortality_rate": "",
+    "mortality_rate": "covid",
     "life_expectancy": "",
     "incidence_rate": ""
 }
@@ -20,7 +20,7 @@ INDICATOR_TO_DISEASE = {
 INDICATOR_TO_ODATA = {
     "death_cases": "GHO/DEATHS_COVID",
     "confirmed_cases": "GHO/CONFIRMED_COVID",
-    "mortality_rate": "GHO/MORTALITY_RATE",
+    "mortality_rate": "GHO/MORTALITY_RATE_COVID",
     "life_expectancy": "GHO/LIFE_EXPECTANCY",
     "incidence_rate": "GHO/INCIDENCE_RATE"
 }
@@ -29,25 +29,28 @@ INDICATOR_TO_ODATA = {
 def webhook():
     try:
         data = request.get_json(force=True)
+        query_text = data.get("queryResult", {}).get("queryText", "")
 
-        # Extract parameters
+        # Extract only relevant parameters
         parameters = data.get("queryResult", {}).get("parameters", {})
         indicator = parameters.get("indicator", "").lower()
         place = parameters.get("place", "")
         year = parameters.get("year", "")
         disease = parameters.get("disease", "")
 
-        # Infer disease if missing
+        # Ignore extra parameters
+        # Automatically infer disease if missing
         if not disease:
             disease = INDICATOR_TO_DISEASE.get(indicator, "")
+            if not disease and "covid" in query_text.lower():
+                disease = "covid"
 
         # Map indicator to WHO OData endpoint
         odata_endpoint = INDICATOR_TO_ODATA.get(indicator, indicator)
 
-        # Default result
         result_value = "Data not found"
 
-        # Construct OData API URL
+        # Build OData API URL dynamically
         if indicator and year:
             filter_parts = []
             if place:
@@ -61,7 +64,7 @@ def webhook():
             print("Fetching WHO OData:", odata_url)
             print("Indicator:", indicator, "Disease:", disease, "Place:", place, "Year:", year)
 
-            # Fetch data from OData API
+            # Fetch data
             try:
                 response = requests.get(odata_url, timeout=5)
                 if response.status_code == 200:
@@ -77,9 +80,9 @@ def webhook():
         else:
             result_value = "Indicator or year missing in the query"
 
-        # Extra metadata
+        # Add extra metadata
         metadata = {
-            "query": data.get("queryResult", {}).get("queryText", ""),
+            "query": query_text,
             "indicator": indicator,
             "place": place,
             "year": year,
@@ -103,7 +106,6 @@ def webhook():
         })
 
     except Exception as e:
-        # Catch-all error response
         error_text = f"Webhook error: {str(e)}"
         return jsonify({
             "fulfillmentText": error_text,
