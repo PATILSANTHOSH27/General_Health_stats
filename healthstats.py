@@ -31,9 +31,20 @@ def webhook():
 
     # Extract parameters from Dialogflow payload
     params = req.get("queryResult", {}).get("parameters", {})
+
+    # Fallback: check outputContexts if missing
+    if not params:
+    contexts = req.get("queryResult", {}).get("outputContexts", [])
+    for ctx in contexts:
+        ctx_params = ctx.get("parameters", {})
+        if ctx_params.get("disease"):
+            params = ctx_params
+            break
+
     disease = params.get("disease")
     country = params.get("country")
     year = params.get("year")
+
 
     if not disease or not country or not year:
         return jsonify({"fulfillmentText": "Please provide disease, country, and year."})
