@@ -7,15 +7,6 @@ app = Flask(__name__)
 # WHO OData API base URL
 ODATA_API_URL = "https://ghoapi.azureedge.net/odata"
 
-# Map indicators to default diseases if disease param is missing
-INDICATOR_TO_DISEASE = {
-    "death_cases": "covid",
-    "confirmed_cases": "covid",
-    "mortality_rate": "covid",
-    "life_expectancy": "",
-    "incidence_rate": ""
-}
-
 # Map indicators to WHO OData API endpoints
 INDICATOR_TO_ODATA = {
     "death_cases": "GHO/DEATHS_COVID",
@@ -37,13 +28,6 @@ def webhook():
         place = parameters.get("place", "")
         year = parameters.get("year", "")
         disease = parameters.get("disease", "")
-
-        # Ignore extra parameters
-        # Automatically infer disease if missing
-        if not disease:
-            disease = INDICATOR_TO_DISEASE.get(indicator, "")
-            if not disease and "covid" in query_text.lower():
-                disease = "covid"
 
         # Map indicator to WHO OData endpoint
         odata_endpoint = INDICATOR_TO_ODATA.get(indicator, indicator)
