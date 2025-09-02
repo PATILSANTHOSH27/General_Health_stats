@@ -3,89 +3,110 @@ import requests
 
 app = Flask(__name__)
 
-# Base WHO API URL
-WHO_API_BASE = "https://ghoapi.azureedge.net/api/"
-
-# Mapping of Dialogflow indicator/disease to WHO API indicator codes
-WHO_INDICATOR_MAP = {
-    "life_expectancy": "WHOSIS_000001",
-    "hiv_cases": "HIV_000001",
-    "tb_deaths": "TB_000001",
-    "malaria_deaths": "MALARIA_000001",
-    "covid19_cases": "COVID19_000001"
-    # Add more mappings here
+# Predefined metadata for indicators
+indicator_metadata = {
+    "covid_death_cases": {
+        "description": "Number of confirmed deaths due to Covid-19",
+        "unit": "People",
+        "source": "World Health Organization (WHO)"
+    },
+    "tb_deaths": {
+        "description": "Number of deaths due to Tuberculosis",
+        "unit": "People",
+        "source": "World Health Organization (WHO)"
+    },
+    "life_expectancy": {
+        "description": "Average life expectancy at birth",
+        "unit": "Years",
+        "source": "World Health Organization (WHO)"
+    }
 }
+
+# Function to fetch data from Athena API
+def get_athena_data(indicator, place, year):
+    url = f"https://apps.who.int/gho/athena/api/GHO/{indicator}/{place}/{year}?format=json&profile=simple"
+    response = requests.get(url)
+    data = response.json()
+    try:
+        value = data["fact"][0]["Value"]
+        return value
+    except:
+        return None
+
+# Function to fetch data from OData API (for multiple indicators / places / years)
+def get_odata_data(indicators, places, years):
+    results = []
+    for ind in indicators:
+        for pl in places:
+            for yr in years:
+                url = f"https://ghoapi.azureedge.net/api/{ind}?$filter=COUNTRY:{pl};YEAR:{yr}"
+                response = requests.get(url)
+                try:
+                    data = response.json()
+                    value = data['value'][0]['NumericValue']
+                    results.append((ind, ind.split('_')[0], pl, yr, value))
+                except:
+                    results.append((ind, ind.split('_')[0], pl, yr, None))
+    return results
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     req = request.get_json()
+    parameters = req['queryResult']['parameters']
     
-    intent_name = req["queryResult"]["intent"]["displayName"]
-    parameters = req["queryResult"]["parameters"]
+    # Extract parameters
+    indicator = parameters.get('indicator')
+    disease = parameters.get('disease')
+    place = parameters.get('place')
+    year = parameters.get('year')
     
-    places = parameters.get("places") or ""
-    year = parameters.get("year") or ""
-
-    disease = parameters.get("disease") or parameters.get("diseases")
-    indicator = parameters.get("indicator") or parameters.get("indicators")
-
-    if not disease and not indicator:
-        return jsonify({"fulfillmentText": "Please provide a disease or indicator to fetch data."})
+    # If disease missing, extract from indicator
+    if not disease:
+        if isinstance(indicator, str):
+            disease = indicator.split('_')[0]
+        elif isinstance(indicator, list):
+            disease = [ind.split('_')[0] for ind in indicator]
     
-    # If year comes as full date, extract year only
-    if year:
-        year = year[:4]
-
     response_text = ""
-
-    if intent_name == "get_life_expectancy":
-        indicator_code = WHO_INDICATOR_MAP.get("life_expectancy")
-        response_text = fetch_who_data(indicator_code, places, year)
-
-    elif intent_name == "get_hiv_cases":
-        indicator_code = WHO_INDICATOR_MAP.get("hiv_cases")
-        response_text = fetch_who_data(indicator_code, places, year)
-
-    elif intent_name == "get_tb_deaths":
-        indicator_code = WHO_INDICATOR_MAP.get("tb_deaths")
-        response_text = fetch_who_data(indicator_code, places, year)
-
-    elif intent_name == "get_indicator_data":
-        if indicator:
-            indicator_code = WHO_INDICATOR_MAP.get(indicator)
-            response_text = fetch_who_data(indicator_code, places, year)
+    
+    # Determine single vs multiple query
+    if isinstance(indicator, str) and isinstance(place, str) and isinstance(year, str):
+        # Athena API for single query
+        value = get_athena_data(indicator, place, year)
+        if value:
+            meta = indicator_metadata.get(indicator, {})
+            response_text += f"{disease.title()} {indicator.replace(disease+'_','')} in {place} in {year}: {value}\n"
+            if meta:
+                response_text += f"Indicator: {meta.get('description','')}\n"
+                response_text += f"Unit: {meta.get('unit','')}\n"
+                response_text += f"Source: {meta.get('source','')}\n"
+                response_text += f"Year: {year}"
         else:
-            response_text = "Sorry, I could not find the indicator."
-
-    elif intent_name == "get_disease_overview":
-        if disease:
-            response_text = f"{disease} is a disease. WHO provides detailed statistics for it."
-        else:
-            response_text = "Please provide the disease name."
-
+            response_text = f"Sorry, data not found for {disease} in {place} for {year}."
+    
     else:
-        response_text = "Sorry, I don't understand your request."
-
+        # OData API for multiple queries
+        if isinstance(indicator, str):
+            indicator = [indicator]
+        if isinstance(place, str):
+            place = [place]
+        if isinstance(year, str):
+            year = [year]
+        
+        results = get_odata_data(indicator, place, year)
+        lines = []
+        for ind, dis, pl, yr, val in results:
+            meta = indicator_metadata.get(ind, {})
+            if val:
+                line = f"{dis.title()} {ind.replace(dis+'_','')} in {pl} in {yr}: {val}"
+                if meta:
+                    line += f"\nIndicator: {meta.get('description','')}\nUnit: {meta.get('unit','')}\nSource: {meta.get('source','')}\nYear: {yr}"
+            else:
+                line = f"Sorry, data not found for {dis} in {pl} for {yr}."
+            lines.append(line)
+        response_text = "\n\n".join(lines)
+    
     return jsonify({"fulfillmentText": response_text})
 
-
-def fetch_who_data(indicator_code, places, year):
-    if not indicator_code or not places or not year:
-        return "Missing parameters to fetch WHO data."
-
-    url = f"{WHO_API_BASE}{indicator_code}?$filter=SpatialDim eq '{places}' and TimeDim eq {year}"
-    try:
-        r = requests.get(url)
-        data = r.json()
-        if "value" in data and len(data["value"]) > 0:
-            result = data["value"][0]
-            val = result.get("NumericValue") or result.get("Display")
-            return f"The value for {indicator_code} in {places} for {year} is {val}."
-        else:
-            return f"No data found for {indicator_code} in {places} for {year}."
-    except Exception as e:
-        return f"Error fetching data: {str(e)}"
-
-
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5000)
