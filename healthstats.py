@@ -1,101 +1,115 @@
 from flask import Flask, request, jsonify
 import requests
-import datetime
+from datetime import datetime
 
 app = Flask(__name__)
 
-# WHO OData API base URL
-ODATA_API_URL = "https://ghoapi.azureedge.net/odata"
+# WHO OData base URL
+BASE_URL = "https://ghoapi.azureedge.net/api/"
 
-# Map indicators to WHO OData API endpoints
-INDICATOR_TO_ODATA = {
-    "death_cases": "GHO/DEATHS_COVID",
-    "confirmed_cases": "GHO/CONFIRMED_COVID",
-    "mortality_rate": "GHO/MORTALITY_RATE_COVID",
-    "life_expectancy": "GHO/LIFE_EXPECTANCY",
-    "incidence_rate": "GHO/INCIDENCE_RATE"
-}
+def fetch_from_who(indicator, place=None, year=None):
+    """
+    Fetch data dynamically from WHO OData API.
+    Only applies filters if user provided place/year.
+    """
+    url = f"{BASE_URL}{indicator}"
+    filters = []
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        data = request.get_json(force=True)
-        query_text = data.get("queryResult", {}).get("queryText", "")
+    if place:
+        filters.append(f"SpatialDim eq '{place}'")
+    if year:
+        filters.append(f"TimeDim eq {year}")
 
-        # Extract only relevant parameters
-        parameters = data.get("queryResult", {}).get("parameters", {})
-        indicator = parameters.get("indicator", "").lower()
-        place = parameters.get("place", "")
-        year = parameters.get("year", "")
-        disease = parameters.get("disease", "")
+    params = {}
+    if filters:
+        params["$filter"] = " and ".join(filters)
 
-        # Map indicator to WHO OData endpoint
-        odata_endpoint = INDICATOR_TO_ODATA.get(indicator, indicator)
+    response = requests.get(url, params=params)
 
-        result_value = "Data not found"
-
-        # Build OData API URL dynamically
-        if indicator and year:
-            filter_parts = []
-            if place:
-                filter_parts.append(f"SpatialDim eq '{place}'")
-            if year:
-                filter_parts.append(f"TimeDim eq '{year}'")
-            filter_query = " and ".join(filter_parts)
-            odata_url = f"{ODATA_API_URL}/{odata_endpoint}?$filter={filter_query}"
-
-            # Debugging
-            print("Fetching WHO OData:", odata_url)
-            print("Indicator:", indicator, "Disease:", disease, "Place:", place, "Year:", year)
-
-            # Fetch data
-            try:
-                response = requests.get(odata_url, timeout=5)
-                if response.status_code == 200:
-                    data_json = response.json()
-                    if "value" in data_json and len(data_json["value"]) > 0:
-                        result_value = data_json["value"][0].get("NumericValue", "Data not found")
-                    else:
-                        result_value = "No data available for given parameters"
-                else:
-                    result_value = f"WHO OData API returned status code {response.status_code}"
-            except Exception as e:
-                result_value = f"Error fetching data: {str(e)}"
-        else:
-            result_value = "Indicator or year missing in the query"
-
-        # Add extra metadata
-        metadata = {
-            "query": query_text,
-            "indicator": indicator,
-            "place": place,
-            "year": year,
-            "disease": disease,
-            "source": "WHO OData API",
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+    if response.status_code != 200:
+        return {
+            "error": f"WHO OData API returned status {response.status_code}",
+            "url": url,
+            "filters": params
         }
 
-        # Construct dynamic response
-        fulfillment_text = (
-            f"Total {indicator.replace('_',' ')} for {disease.capitalize()} in {place} ({year}): {result_value}\n"
-            f"(Metadata: {metadata})"
-        )
+    return response.json()
 
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    req = request.get_json(silent=True, force=True)
+
+    # Extract intent name
+    intent_name = req.get("queryResult", {}).get("intent", {}).get("displayName", "")
+
+    if intent_name != "get_health_data":
+        return jsonify({"fulfillmentText": "Intent not supported."})
+
+    # Extract parameters
+    params = req.get("queryResult", {}).get("parameters", {})
+    indicator = params.get("indicator", "")
+    disease = params.get("disease", "")
+    place = params.get("place", "")
+    year = params.get("year", "")
+
+    # Validate indicator
+    if not indicator:
+        return jsonify({"fulfillmentText": "Please specify what health indicator you want (e.g., deaths, cases)."})
+
+    # Call WHO API
+    data = fetch_from_who(indicator, place, year)
+
+    # Check for errors
+    if "error" in data:
         return jsonify({
-            "fulfillmentText": fulfillment_text,
-            "fulfillmentMessages": [
-                {"text": {"text": [fulfillment_text]}}
-            ],
-            "source": "general-health-stats-1.onrender.com"
+            "fulfillmentText": (
+                f"Sorry, I couldn’t fetch the data. {data['error']} "
+                f"(Query tried: {data['url']} with {data.get('filters', {})})"
+            )
         })
 
-    except Exception as e:
-        error_text = f"Webhook error: {str(e)}"
+    # Extract results
+    values = data.get("value", [])
+    if not values:
         return jsonify({
-            "fulfillmentText": error_text,
-            "fulfillmentMessages": [{"text": {"text": [error_text]}}],
-            "source": "general-health-stats-1.onrender.com"
+            "fulfillmentText": (
+                f"No data found for {indicator} "
+                f"{'in ' + place if place else ''} "
+                f"{'for ' + str(year) if year else ''}."
+            )
         })
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    # Pick first result (can be extended for multiple)
+    record = values[0]
+    value = record.get("NumericValue", "N/A")
+
+    # Build response
+    response_text = (
+        f"According to WHO, the {indicator.replace('_', ' ')} "
+        f"{'for ' + disease if disease else ''} "
+        f"{'in ' + place if place else ''} "
+        f"{'during ' + str(year) if year else ''} "
+        f"is {value}."
+    )
+
+    # Add metadata for debugging
+    metadata = {
+        "query": req.get("queryResult", {}).get("queryText", ""),
+        "indicator": indicator,
+        "place": place,
+        "year": year,
+        "disease": disease,
+        "source": "WHO OData API",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+
+    return jsonify({
+        "fulfillmentText": response_text,
+        "source": "webhook",
+        "metadata": metadata
+    })
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000, debug=True)
