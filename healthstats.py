@@ -47,16 +47,16 @@ def webhook():
     params = req["queryResult"].get("parameters", {})
 
     # Adjust extraction
-    disease = params.get("any", [None])[0] if params.get("any") else None
-    data_type = params.get("any", [None])[1] if len(params.get("any", [])) > 1 else None
+    #disease = params.get("any", [None])[0] if params.get("any") else None
+    #data_type = params.get("any", [None])[1] if len(params.get("any", [])) > 1 else None
     country_input = params.get("geo-country", [None])[0] if params.get("geo-country") else None
-    year = params.get("year", [None])[0] if params.get("year") else None
+    #year = params.get("year", [None])[0] if params.get("year") else None
 
     #country_input = params.get("country") or ""
-    #disease = params.get("disease") or ""
+    disease = params.get("disease") or ""
     #indicator = params.get("indicator") or ""
-    #data_type = params.get("data_type") or ""
-    #year = params.get("year") or ""
+    data_type = params.get("data_type") or ""
+    year = params.get("year") or ""
 
     if year:
         year = year[:4]
