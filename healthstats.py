@@ -3,121 +3,118 @@ import requests
 
 app = Flask(__name__)
 
-# -----------------------------
-# Disease → WHO IndicatorCode mapping
-# -----------------------------
-DISEASE_INDICATOR_MAP = {
-    "dengue cases": "DENGUE_REPORTED_CASES",
-    "dengue": "DENGUE_REPORTED_CASES",
-    "dengue infections": "DENGUE_REPORTED_CASES",
-    
-    "malaria incidence": "MALARIA_REPORTED_CASES",
-    "malaria cases": "MALARIA_REPORTED_CASES",
-    "malaria infections": "MALARIA_REPORTED_CASES",
-    
-    "tuberculosis cases": "TB_REPORTED_CASES",
-    "tb": "TB_REPORTED_CASES",
-    "tuberculosis": "TB_REPORTED_CASES",
-    
-    "hiv cases": "HIV_REPORTED_CASES",
-    "hiv infections": "HIV_REPORTED_CASES",
-    "hiv": "HIV_REPORTED_CASES",
-    
-    "covid-19 cases": "COVID19_CONFIRMED_CASES",
-    "covid19 cases": "COVID19_CONFIRMED_CASES",
-    "covid cases": "COVID19_CONFIRMED_CASES",
-    "covid": "COVID19_CONFIRMED_CASES",
-    
-    "cholera cases": "CHOLERA_REPORTED_CASES",
-    "cholera": "CHOLERA_REPORTED_CASES",
-    "cholera infections": "CHOLERA_REPORTED_CASES",
-    
-    "measles cases": "MEASLES_REPORTED_CASES",
-    "measles": "MEASLES_REPORTED_CASES",
-    "rubeola": "MEASLES_REPORTED_CASES",
-    
-    "hepatitis cases": "HEPATITIS_REPORTED_CASES",
-    "hepatitis": "HEPATITIS_REPORTED_CASES",
-    "hepatitis infections": "HEPATITIS_REPORTED_CASES",
-    
-    "influenza cases": "INFLUENZA_REPORTED_CASES",
-    "flu": "INFLUENZA_REPORTED_CASES",
-    "influenza": "INFLUENZA_REPORTED_CASES",
-    
-    "polio cases": "POLIO_REPORTED_CASES",
-    "poliomyelitis": "POLIO_REPORTED_CASES",
-    "polio": "POLIO_REPORTED_CASES",
-    
-    "typhoid cases": "TYPHOID_REPORTED_CASES",
-    "typhoid fever": "TYPHOID_REPORTED_CASES",
-    "enteric fever": "TYPHOID_REPORTED_CASES",
-    
-    "yellow fever cases": "YELLOW_FEVER_REPORTED_CASES",
-    "yellow fever": "YELLOW_FEVER_REPORTED_CASES",
-    
-    "rabies cases": "RABIES_REPORTED_CASES",
-    "rabies infections": "RABIES_REPORTED_CASES",
-    "rabies": "RABIES_REPORTED_CASES"
+WHO_API_BASE = "https://ghoapi.azureedge.net/api/"
+
+# -------- Load WHO Indicators Dynamically --------
+def load_who_indicators():
+    url = WHO_API_BASE + "Indicators"
+    try:
+        r = requests.get(url)
+        data = r.json()
+        mapping = {}
+        for item in data.get("value", []):
+            key = item["IndicatorName"].lower().replace(" ", "_")
+            mapping[key] = item["IndicatorCode"]
+        return mapping
+    except Exception as e:
+        print(f"Error fetching WHO indicators: {str(e)}")
+        return {}
+
+WHO_INDICATOR_MAP = load_who_indicators()
+
+# -------- Load WHO Countries Dynamically --------
+def load_country_map():
+    url = WHO_API_BASE + "Dimension/SpatialDim"
+    try:
+        r = requests.get(url)
+        data = r.json()
+        mapping = {}
+        for item in data.get("value", []):
+            name = item["Title"].lower()
+            code = item["Code"]
+            mapping[name] = code
+        return mapping
+    except Exception as e:
+        print(f"Error fetching countries: {str(e)}")
+        return {}
+
+COUNTRY_CODE_MAP = load_country_map()
+
+# Optional alias map for common variations
+COUNTRY_ALIASES = {
+    "us": "united states",
+    "america": "united states",
+    "uk": "united kingdom",
+    "uae": "united arab emirates"
 }
 
-# -----------------------------
-# Webhook endpoint
-# -----------------------------
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    req = request.get_json(force=True)
+    req = request.get_json()
+    intent_name = req["queryResult"]["intent"]["displayName"]
+    params = req["queryResult"].get("parameters", {})
 
-    # Extract parameters
-    params = req.get("queryResult", {}).get("parameters", {})
-    if not params:
-        # fallback to outputContexts
-        contexts = req.get("queryResult", {}).get("outputContexts", [])
-        for ctx in contexts:
-            ctx_params = ctx.get("parameters", {})
-            if ctx_params.get("disease"):
-                params = ctx_params
-                break
+    country_input = params.get("country") or ""
+    disease = params.get("disease") or ""
+    indicator = params.get("indicator") or ""
+    data_type = params.get("data_type") or ""
+    year = params.get("year") or ""
 
-    disease = params.get("disease")
-    country = params.get("country")
-    year = params.get("year")
+    if year:
+        year = year[:4]
 
-    if not disease or not country or not year:
-        return jsonify({"fulfillmentText": "Please provide disease, country, and year."})
+    # Normalize country name using aliases
+    country_key = COUNTRY_ALIASES.get(country_input.lower(), country_input.lower())
+    country_code = COUNTRY_CODE_MAP.get(country_key)
 
-    # Map disease to WHO IndicatorCode
-    indicator_code = DISEASE_INDICATOR_MAP.get(disease.lower())
-    if not indicator_code:
-        return jsonify({"fulfillmentText": f"Sorry, I don’t have data mapping for {disease}."})
+    response_text = ""
 
-    api_url = f"https://ghoapi.azureedge.net/api/{indicator_code}?$filter=SpatialDim eq '{country}' and TimeDim eq {year}"
+    # -------- Get Disease Data --------
+    if intent_name == "get_disease_data":
+        if not disease or not data_type or not country_code or not year:
+            response_text = "Please provide disease, data type, country, and year."
+        else:
+            key = f"{disease.lower()}_{data_type.lower()}"
+            indicator_code = WHO_INDICATOR_MAP.get(key)
+            response_text = fetch_who_data(indicator_code, country_code, year)
 
+    # -------- Get General Indicator Data --------
+    elif intent_name == "get_indicator_data":
+        if not indicator or not country_code or not year:
+            response_text = "Please provide indicator, country, and year."
+        else:
+            indicator_code = WHO_INDICATOR_MAP.get(indicator.lower())
+            response_text = fetch_who_data(indicator_code, country_code, year)
+
+    # -------- Get Disease Overview --------
+    elif intent_name == "get_disease_overview":
+        if disease:
+            response_text = f"{disease.capitalize()} is a disease. WHO provides detailed statistics and reports for it."
+        else:
+            response_text = "Please provide the disease name."
+
+    else:
+        response_text = "Sorry, I don't understand your request."
+
+    return jsonify({"fulfillmentText": response_text})
+
+
+def fetch_who_data(indicator_code, country_code, year):
+    if not indicator_code or not country_code or not year:
+        return "Missing parameters to fetch WHO data."
+
+    url = f"{WHO_API_BASE}{indicator_code}?$filter=SpatialDim eq '{country_code}' and TimeDim eq {year}"
     try:
-        response = requests.get(api_url)
-        if response.status_code != 200:
-            return jsonify({"fulfillmentText": f"WHO API returned {response.status_code} for {disease} in {country} {year}."})
-
-        data = response.json().get("value", [])
-
-        if not data:
-            # Fetch all available years for this disease and country
-            all_data_url = f"https://ghoapi.azureedge.net/api/{indicator_code}?$filter=SpatialDim eq '{country}'"
-            all_response = requests.get(all_data_url)
-            if all_response.status_code == 200:
-                all_data = all_response.json().get("value", [])
-                available_years = sorted({str(d.get("TimeDim")) for d in all_data if d.get("TimeDim")})
-                if available_years:
-                    years_str = ", ".join(available_years)
-                    return jsonify({"fulfillmentText": f"No data found for {disease} in {country} for {year}. Available years: {years_str}."})
-            return jsonify({"fulfillmentText": f"No data found for {disease} in {country} for {year}."})
-
-        numeric_value = data[0].get("NumericValue", "N/A")
-        answer = f"The number of {disease} in {country} in {year} was {numeric_value}."
-        return jsonify({"fulfillmentText": answer})
-
+        r = requests.get(url)
+        data = r.json()
+        if "value" in data and len(data["value"]) > 0:
+            val = data["value"][0].get("NumericValue") or data["value"][0].get("Display")
+            return f"The value for {indicator_code} in {country_code} for {year} is {val}."
+        else:
+            return f"No data found for {indicator_code} in {country_code} for {year}."
     except Exception as e:
-        return jsonify({"fulfillmentText": f"Error fetching data: {str(e)}"})
+        return f"Error fetching data from WHO API: {str(e)}"
 
-# Run Flask
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(debug=True)
