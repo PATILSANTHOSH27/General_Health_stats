@@ -24,10 +24,13 @@ def webhook():
     parameters = req["queryResult"]["parameters"]
     
     places = parameters.get("places") or ""
-    disease = parameters.get("disease") or ""
-    indicator = parameters.get("indicator") or ""
     year = parameters.get("year") or ""
 
+    disease = parameters.get("disease") or parameters.get("diseases")
+    indicator = parameters.get("indicator") or parameters.get("indicators")
+
+    if not disease and not indicator:
+        return jsonify({"fulfillmentText": "Please provide a disease or indicator to fetch data."})
     
     # If year comes as full date, extract year only
     if year:
