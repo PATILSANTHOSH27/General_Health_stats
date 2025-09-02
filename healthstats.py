@@ -16,6 +16,15 @@ INDICATOR_TO_DISEASE = {
     "incidence_rate": ""
 }
 
+# Map indicators to WHO OData API endpoints
+INDICATOR_TO_ODATA = {
+    "death_cases": "GHO/DEATHS_COVID",
+    "confirmed_cases": "GHO/CONFIRMED_COVID",
+    "mortality_rate": "GHO/MORTALITY_RATE",
+    "life_expectancy": "GHO/LIFE_EXPECTANCY",
+    "incidence_rate": "GHO/INCIDENCE_RATE"
+}
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -28,9 +37,12 @@ def webhook():
         year = parameters.get("year", "")
         disease = parameters.get("disease", "")
 
-        # Explicitly infer disease from indicator if missing
+        # Infer disease if missing
         if not disease:
             disease = INDICATOR_TO_DISEASE.get(indicator, "")
+
+        # Map indicator to WHO OData endpoint
+        odata_endpoint = INDICATOR_TO_ODATA.get(indicator, indicator)
 
         # Default result
         result_value = "Data not found"
@@ -43,7 +55,11 @@ def webhook():
             if year:
                 filter_parts.append(f"TimeDim eq '{year}'")
             filter_query = " and ".join(filter_parts)
-            odata_url = f"{ODATA_API_URL}/{indicator}?$filter={filter_query}"
+            odata_url = f"{ODATA_API_URL}/{odata_endpoint}?$filter={filter_query}"
+
+            # Debugging
+            print("Fetching WHO OData:", odata_url)
+            print("Indicator:", indicator, "Disease:", disease, "Place:", place, "Year:", year)
 
             # Fetch data from OData API
             try:
@@ -83,7 +99,7 @@ def webhook():
             "fulfillmentMessages": [
                 {"text": {"text": [fulfillment_text]}}
             ],
-            "source": "general-health-stats.onrender.com"
+            "source": "general-health-stats-1.onrender.com"
         })
 
     except Exception as e:
@@ -92,7 +108,7 @@ def webhook():
         return jsonify({
             "fulfillmentText": error_text,
             "fulfillmentMessages": [{"text": {"text": [error_text]}}],
-            "source": "general-health-stats.onrender.com"
+            "source": "general-health-stats-1.onrender.com"
         })
 
 if __name__ == '__main__':
