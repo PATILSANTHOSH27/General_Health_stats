@@ -3,10 +3,9 @@ import requests
 
 app = Flask(__name__)
 
-# -----------------------------------------
+# -----------------------------
 # Disease → WHO IndicatorCode mapping
-# (placeholder codes – replace with actual ones from WHO API)
-# -----------------------------------------
+# -----------------------------
 DISEASE_INDICATOR_MAP = {
     "dengue cases": "DENGUE_REPORTED_CASES",
     "malaria incidence": "MALARIA_REPORTED_CASES",
@@ -23,17 +22,18 @@ DISEASE_INDICATOR_MAP = {
     "rabies cases": "RABIES_REPORTED_CASES"
 }
 
-# -----------------------------------------
+# -----------------------------
 # Webhook endpoint
-# -----------------------------------------
+# -----------------------------
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    req = request.get_json(silent=True, force=True)
+    req = request.get_json(force=True)
 
-    # Extract parameters from Dialogflow request
-    disease = req.get("queryResult", {}).get("parameters", {}).get("Disease")
-    country = req.get("queryResult", {}).get("parameters", {}).get("Country")
-    year = req.get("queryResult", {}).get("parameters", {}).get("Year")
+    # Extract parameters from Dialogflow payload
+    params = req.get("queryResult", {}).get("parameters", {})
+    disease = params.get("disease")
+    country = params.get("country")
+    year = params.get("year")
 
     if not disease or not country or not year:
         return jsonify({"fulfillmentText": "Please provide disease, country, and year."})
@@ -49,23 +49,21 @@ def webhook():
     try:
         response = requests.get(api_url)
         if response.status_code != 200:
-            return jsonify({"fulfillmentText": f"Sorry, WHO API returned {response.status_code} for {disease} in {country} {year}."})
+            return jsonify({"fulfillmentText": f"WHO API returned {response.status_code} for {disease} in {country} {year}."})
 
         data = response.json().get("value", [])
         if not data:
             return jsonify({"fulfillmentText": f"No data found for {disease} in {country} for {year}."})
 
-        # Get the numeric value
         numeric_value = data[0].get("NumericValue", "N/A")
-
         answer = f"The number of {disease} in {country} in {year} was {numeric_value}."
         return jsonify({"fulfillmentText": answer})
 
     except Exception as e:
         return jsonify({"fulfillmentText": f"Error fetching data: {str(e)}"})
 
-# -----------------------------------------
+# -----------------------------
 # Run locally
-# -----------------------------------------
+# -----------------------------
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
