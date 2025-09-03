@@ -6,31 +6,11 @@ app = Flask(__name__)
 
 # -------- Static Mapping of Diseases to WHO URLs --------
 DISEASE_OVERVIEWS = {
-    # "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza",
+    "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza",
     "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
     "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
     "hiv": "https://www.who.int/news-room/fact-sheets/detail/hiv-aids",
     "dengue": "https://www.who.int/news-room/fact-sheets/detail/dengue-and-severe-dengue",
-    # "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
-    # "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
-    # "hiv": "https://www.who.int/news-room/fact-sheets/detail/hiv-aids",
-    "aids": "https://www.who.int/news-room/fact-sheets/detail/hiv-aids",
-    "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
-    "cholera": "https://www.who.int/news-room/fact-sheets/detail/cholera",
-    "ebola": "https://www.who.int/news-room/fact-sheets/detail/ebola-virus-disease",
-    # "dengue": "https://www.who.int/news-room/fact-sheets/detail/dengue-and-severe-dengue",
-    "zika": "https://www.who.int/news-room/fact-sheets/detail/zika-virus",
-    "covid-19": "https://www.who.int/news-room/fact-sheets/detail/coronavirus-disease-(covid-19)",
-    "measles": "https://www.who.int/news-room/fact-sheets/detail/measles",
-    "polio": "https://www.who.int/news-room/fact-sheets/detail/poliomyelitis",
-    "rabies": "https://www.who.int/news-room/fact-sheets/detail/rabies",
-    "yellow fever": "https://www.who.int/news-room/fact-sheets/detail/yellow-fever",
-    "hepatitis": "https://www.who.int/news-room/fact-sheets/detail/hepatitis",
-    "hepatitis a": "https://www.who.int/news-room/fact-sheets/detail/hepatitis-a",
-    "hepatitis b": "https://www.who.int/news-room/fact-sheets/detail/hepatitis-b",
-    "hepatitis c": "https://www.who.int/news-room/fact-sheets/detail/hepatitis-c",
-    "leprosy": "https://www.who.int/news-room/fact-sheets/detail/leprosy",
-    "typhoid": "https://www.who.int/news-room/fact-sheets/detail/typhoid"
     # add more diseases + URLs
 }
 
@@ -48,10 +28,12 @@ def fetch_disease_overview(url):
         if not content_div:
             return f"Overview not found. Read more here: {url}"
 
-        # Extract the first paragraph as summary
-        first_para = content_div.find("p")
-        if first_para:
-            return first_para.get_text(strip=True)
+        # Extract all paragraphs in the div
+        paragraphs = content_div.find_all("p")
+        if paragraphs:
+            # Join the first few paragraphs (e.g., first 3–5) for a concise overview
+            overview_text = "\n\n".join(p.get_text(strip=True) for p in paragraphs[:5])
+            return overview_text
         else:
             return f"Overview not found. Read more here: {url}"
 
@@ -86,4 +68,3 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
