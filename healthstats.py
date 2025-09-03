@@ -42,7 +42,7 @@ COUNTRY_ALIASES = {
 }
 
 # -------- WHO API Base --------
-WHO_API_BASE = "https://ghoapi.azureedge.net/api/"
+WHO_API_BASE = "https://ghoapi.azureedge.net/api/$metadata"
 
 # -------- Helper Function --------
 def fetch_who_data(indicator_code, country, year):
