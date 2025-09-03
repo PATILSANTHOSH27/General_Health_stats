@@ -6,6 +6,7 @@ app = Flask(__name__)
 
 # -------- Static mapping of diseases to WHO fact sheet URLs --------
 DISEASE_OVERVIEWS = {
+    DISEASE_OVERVIEWS = {
     "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
     "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
     "dengue": "https://www.who.int/news-room/fact-sheets/detail/dengue-and-severe-dengue",
@@ -16,6 +17,19 @@ DISEASE_OVERVIEWS = {
     "measles": "https://www.who.int/news-room/fact-sheets/detail/measles",
     "ebola": "https://www.who.int/news-room/fact-sheets/detail/ebola-virus-disease",
     "zika": "https://www.who.int/news-room/fact-sheets/detail/zika-virus",
+    "yellow fever": "https://www.who.int/news-room/fact-sheets/detail/yellow-fever",
+    "hepatitis b": "https://www.who.int/news-room/fact-sheets/detail/hepatitis-b",
+    "hepatitis c": "https://www.who.int/news-room/fact-sheets/detail/hepatitis-c",
+    "rabies": "https://www.who.int/news-room/fact-sheets/detail/rabies",
+    "meningitis": "https://www.who.int/news-room/fact-sheets/detail/meningitis",
+    "leprosy": "https://www.who.int/news-room/fact-sheets/detail/leprosy",
+    "schistosomiasis": "https://www.who.int/news-room/fact-sheets/detail/schistosomiasis",
+    "trypanosomiasis": "https://www.who.int/news-room/fact-sheets/detail/trypanosomiasis-(sleeping-sickness)",
+    "onchocerciasis": "https://www.who.int/news-room/fact-sheets/detail/onchocerciasis-(river-blindness)",
+    "lyme disease": "https://www.who.int/news-room/fact-sheets/detail/lyme-disease",
+    # Add more diseases here if needed
+}
+
     # Add more diseases here...
 }
 
