@@ -19,32 +19,31 @@ DISEASE_OVERVIEWS = {
     # Add more diseases here...
 }
 
-# -------- Helper function to scrape Overview from WHO fact sheet --------
-def fetch_disease_overview(url):
+# -------- Helper function to fetch Overview section --------
+def fetch_overview(url):
     try:
         r = requests.get(url, timeout=10)
-        r.raise_for_status()  # raises HTTPError for bad responses
+        r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # WHO pages usually have content inside this div
-        content_div = soup.find("div", class_="sf-detail-body-wrapper")
-        if not content_div:
+        # Find the heading containing "Overview" (h2 or h3)
+        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "overview" in tag.get_text(strip=True).lower())
+        if not heading:
             return None
 
-        # Collect paragraphs until first <h2>
-        overview_paragraphs = []
-        for child in content_div.children:
-            if child.name == "h2":  # stop at first subsection
+        # Collect all <p> paragraphs until next heading
+        paragraphs = []
+        for sibling in heading.find_next_siblings():
+            if sibling.name in ["h2", "h3"]:
                 break
-            if child.name == "p":
-                text = child.get_text(strip=True)
+            if sibling.name == "p":
+                text = sibling.get_text(strip=True)
                 if text:
-                    overview_paragraphs.append(text)
+                    paragraphs.append(text)
 
-        if overview_paragraphs:
-            return " ".join(overview_paragraphs)
-        else:
-            return None
+        if paragraphs:
+            return " ".join(paragraphs)
+        return None
     except Exception as e:
         return None
 
@@ -59,7 +58,7 @@ def webhook():
     if intent_name == "get_disease_overview":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
-            overview = fetch_disease_overview(url)
+            overview = fetch_overview(url)
             if overview:
                 response_text = overview
             else:
