@@ -77,10 +77,10 @@ def webhook():
     params = req["queryResult"].get("parameters", {})
 
         # -------- Helper to normalize params --------
-def normalize_param(value):
-    if isinstance(value, list):
-        return value[0] if value else ""
-    return value or ""
+    def normalize_param(value):
+        if isinstance(value, list):
+            return value[0] if value else ""
+        return value or ""
 
     # Extract parameters safely
     country_input = normalize_param(params.get("geo-country"))
