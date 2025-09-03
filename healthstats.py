@@ -6,7 +6,6 @@ app = Flask(__name__)
 
 # -------- Static mapping of diseases to WHO fact sheet URLs --------
 DISEASE_OVERVIEWS = {
-    DISEASE_OVERVIEWS = {
     "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
     "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
     "dengue": "https://www.who.int/news-room/fact-sheets/detail/dengue-and-severe-dengue",
@@ -28,9 +27,6 @@ DISEASE_OVERVIEWS = {
     "onchocerciasis": "https://www.who.int/news-room/fact-sheets/detail/onchocerciasis-(river-blindness)",
     "lyme disease": "https://www.who.int/news-room/fact-sheets/detail/lyme-disease",
     # Add more diseases here if needed
-}
-
-    # Add more diseases here...
 }
 
 # -------- Helper function to fetch Overview section --------
