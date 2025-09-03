@@ -77,6 +77,7 @@ def get_indicator_code_from_disease(disease, data_type=None):
     """
     try:
         url = f"{WHO_API_BASE}Indicator?$filter=contains(IndicatorName,'{disease}')"
+        print("DEBUG LOOKUP URL:", url)
         r = requests.get(url)
         if r.status_code != 200:
             return None, f"WHO API returned {r.status_code} while searching for {disease}."
@@ -90,9 +91,11 @@ def get_indicator_code_from_disease(disease, data_type=None):
         if data_type:
             for ind in indicators:
                 if data_type.lower() in ind.get("IndicatorName", "").lower():
+                    print("DEBUG MATCHED INDICATOR:", ind)
                     return ind["IndicatorCode"], None
 
         # Otherwise return the first one
+        print("DEBUG DEFAULT INDICATOR:", indicators[0])
         return indicators[0]["IndicatorCode"], None
 
     except Exception as e:
@@ -125,6 +128,15 @@ def webhook():
     country_key = COUNTRY_ALIASES.get(country_input.lower(), country_input.lower()) if country_input else None
     country_code = COUNTRY_MAP.get(country_key) if country_key else None
 
+    # -------- Debug: Log extracted params --------
+    print("DEBUG PARAMS:")
+    print(f"  Intent: {intent_name}")
+    print(f"  Disease: {disease}")
+    print(f"  Data Type: {data_type}")
+    print(f"  Indicator: {indicator}")
+    print(f"  Country Input: {country_input} -> Country Code: {country_code}")
+    print(f"  Year: {year}")
+
     response_text = ""
 
     # -------- Get Disease Data --------
@@ -137,12 +149,15 @@ def webhook():
 
             # If not in static map, try dynamic lookup
             if not indicator_code:
+                print(f"DEBUG: Static map did not find key {key}. Trying dynamic lookup...")
                 indicator_code, err = get_indicator_code_from_disease(disease, data_type)
                 if not indicator_code:
                     response_text = err or f"No indicator found for {disease} ({data_type})."
                 else:
+                    print(f"DEBUG: Using dynamic indicator {indicator_code}")
                     response_text = fetch_who_data(indicator_code, country_code, year)
             else:
+                print(f"DEBUG: Using static indicator {indicator_code}")
                 response_text = fetch_who_data(indicator_code, country_code, year)
 
     # -------- Get General Indicator Data --------
@@ -152,12 +167,15 @@ def webhook():
         else:
             indicator_code = INDICATOR_MAP.get(indicator.lower())
             if not indicator_code:
+                print(f"DEBUG: Static map did not find indicator {indicator}. Trying dynamic lookup...")
                 indicator_code, err = get_indicator_code_from_disease(indicator)
                 if not indicator_code:
                     response_text = err or f"No indicator found for {indicator}."
                 else:
+                    print(f"DEBUG: Using dynamic indicator {indicator_code}")
                     response_text = fetch_who_data(indicator_code, country_code, year)
             else:
+                print(f"DEBUG: Using static indicator {indicator_code}")
                 response_text = fetch_who_data(indicator_code, country_code, year)
 
     # -------- Get Disease Overview --------
