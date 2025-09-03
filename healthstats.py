@@ -113,8 +113,8 @@ def webhook():
                 response_text = f"Overview not found for {disease.capitalize()}. You can read more here: {url}"
         else:
             response_text = f"Disease not found. Make sure to use a valid disease name."
-    else:
-        response_text = "Sorry, I don't understand your request."
+    # else:
+    #     response_text = "Sorry, I don't understand your request."
 
     return jsonify({"fulfillmentText": response_text})
 
