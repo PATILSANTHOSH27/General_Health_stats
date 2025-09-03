@@ -58,36 +58,42 @@ def fetch_overview(url):
         return None
 
 # -------- Helper Function: Fetch Symptoms --------
-def fetch_disease_symptoms(disease):
-    url = DISEASE_URLS.get(disease.lower())
-    if not url:
-        return f"No WHO fact sheet found for {disease}."
-
+def fetch_symptoms(url):
     try:
-        r = requests.get(url)
-        if r.status_code != 200:
-            return f"Failed to fetch symptoms for {disease}. URL: {url}"
-
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # Look for "Symptoms" or "Signs and symptoms"
-        symptoms_header = soup.find(lambda tag: tag.name in ["h2", "h3", "h4", "h5", "h6"] and ("symptoms" in tag.get_text(strip=True).lower()))
-        if symptoms_header:
-            symptoms_content = []
-            for sib in symptoms_header.find_next_siblings():
-                if sib.name in ["h2", "h3"]:  # Stop at the next section
-                    break
-                # Collect bullet points or text
-                if sib.name == "ul":
-                    for li in sib.find_all("li"):
-                        symptoms_content.append(f"- {li.get_text(' ', strip=True)}")
-                else:
-                    symptoms_content.append(sib.get_text(" ", strip=True))
-            return "\n".join(symptoms_content) if symptoms_content else f"Symptoms not found for {disease}. You can read more here: {url}"
-        else:
-            return f"Symptoms not found for {disease}. You can read more here: {url}"
+        # Find the heading containing "Symptoms" or "Signs and symptoms"
+        heading = soup.find(
+            lambda tag: tag.name in ["h2", "h3"] 
+            and ("symptoms" in tag.get_text(strip=True).lower() 
+                 or "signs and symptoms" in tag.get_text(strip=True).lower())
+        )
+        if not heading:
+            return None
+
+        # Collect all <p> or <li> until next heading
+        points = []
+        for sibling in heading.find_next_siblings():
+            if sibling.name in ["h2", "h3"]:
+                break
+            if sibling.name == "p":
+                text = sibling.get_text(strip=True)
+                if text:
+                    points.append(text)
+            elif sibling.name == "ul":  # bullet points
+                for li in sibling.find_all("li"):
+                    li_text = li.get_text(strip=True)
+                    if li_text:
+                        points.append(f"- {li_text}")
+
+        if points:
+            return "\n".join(points)
+        return None
     except Exception as e:
-        return f"Error fetching symptoms: {str(e)}"
+        return None
+
 
 # -------- Flask webhook route --------
 @app.route('/webhook', methods=['POST'])
@@ -112,15 +118,21 @@ def webhook():
 
     return jsonify({"fulfillmentText": response_text})
 
-    if intent_name == "get_symptoms":
+    # -------- Get Symptoms --------
+    elif intent_name == "get_symptoms":
         if disease:
-            response_text = fetch_disease_symptoms(disease)
+            url = DISEASE_URLS.get(disease.lower())
+            if url:
+                symptoms = fetch_symptoms(url)
+                if symptoms:
+                    response_text = f"Here are the symptoms of {disease.capitalize()}:\n{symptoms}"
+                else:
+                    response_text = f"Symptoms not found for {disease.capitalize()}. You can read more here: {url}"
+            else:
+                response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
         else:
-            response_text = "Please provide a disease name."
-    else:
-        response_text = "Sorry, I don't understand your request."
+            response_text = "Please provide the disease name."
 
-    return jsonify({"fulfillmentText": response_text})
 
 if __name__ == '__main__':
     app.run(debug=True)
