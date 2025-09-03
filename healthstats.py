@@ -57,6 +57,38 @@ def fetch_overview(url):
     except Exception as e:
         return None
 
+# -------- Helper Function: Fetch Symptoms --------
+def fetch_disease_symptoms(disease):
+    url = DISEASE_URLS.get(disease.lower())
+    if not url:
+        return f"No WHO fact sheet found for {disease}."
+
+    try:
+        r = requests.get(url)
+        if r.status_code != 200:
+            return f"Failed to fetch symptoms for {disease}. URL: {url}"
+
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # Look for "Symptoms" or "Signs and symptoms"
+        symptoms_header = soup.find(lambda tag: tag.name in ["h2", "h3", "h4", "h5", "h6"] and ("symptoms" in tag.get_text(strip=True).lower()))
+        if symptoms_header:
+            symptoms_content = []
+            for sib in symptoms_header.find_next_siblings():
+                if sib.name in ["h2", "h3"]:  # Stop at the next section
+                    break
+                # Collect bullet points or text
+                if sib.name == "ul":
+                    for li in sib.find_all("li"):
+                        symptoms_content.append(f"- {li.get_text(' ', strip=True)}")
+                else:
+                    symptoms_content.append(sib.get_text(" ", strip=True))
+            return "\n".join(symptoms_content) if symptoms_content else f"Symptoms not found for {disease}. You can read more here: {url}"
+        else:
+            return f"Symptoms not found for {disease}. You can read more here: {url}"
+    except Exception as e:
+        return f"Error fetching symptoms: {str(e)}"
+
 # -------- Flask webhook route --------
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -75,6 +107,16 @@ def webhook():
                 response_text = f"Overview not found for {disease.capitalize()}. You can read more here: {url}"
         else:
             response_text = f"Disease not found. Make sure to use a valid disease name."
+    else:
+        response_text = "Sorry, I don't understand your request."
+
+    return jsonify({"fulfillmentText": response_text})
+
+    if intent_name == "get_symptoms":
+        if disease:
+            response_text = fetch_disease_symptoms(disease)
+        else:
+            response_text = "Please provide a disease name."
     else:
         response_text = "Sorry, I don't understand your request."
 
