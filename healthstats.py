@@ -42,9 +42,9 @@ COUNTRY_ALIASES = {
 }
 
 # -------- WHO API Base --------
-WHO_API_BASE = "https://ghoapi.azureedge.net/api/$metadata"
+WHO_API_BASE = "https://ghoapi.azureedge.net/api/"
 
-# -------- Helper Function --------
+# -------- Helper Function: Fetch WHO Data --------
 def fetch_who_data(indicator_code, country, year):
     if not indicator_code or not country or not year:
         return "Missing parameters to fetch WHO data."
@@ -69,6 +69,35 @@ def fetch_who_data(indicator_code, country, year):
     except Exception as e:
         return f"Error fetching data: {str(e)}"
 
+# -------- Helper Function: Dynamic Indicator Lookup --------
+def get_indicator_code_from_disease(disease, data_type=None):
+    """
+    Search WHO Indicator API for the given disease name.
+    Optionally filter further using data_type keyword.
+    """
+    try:
+        url = f"{WHO_API_BASE}Indicator?$filter=contains(IndicatorName,'{disease}')"
+        r = requests.get(url)
+        if r.status_code != 200:
+            return None, f"WHO API returned {r.status_code} while searching for {disease}."
+
+        data = r.json()
+        indicators = data.get("value", [])
+        if not indicators:
+            return None, f"No indicators found for {disease}."
+
+        # If data_type provided, filter by it
+        if data_type:
+            for ind in indicators:
+                if data_type.lower() in ind.get("IndicatorName", "").lower():
+                    return ind["IndicatorCode"], None
+
+        # Otherwise return the first one
+        return indicators[0]["IndicatorCode"], None
+
+    except Exception as e:
+        return None, f"Error fetching indicator code: {str(e)}"
+
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -76,7 +105,7 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     params = req["queryResult"].get("parameters", {})
 
-        # -------- Helper to normalize params --------
+    # -------- Helper to normalize params --------
     def normalize_param(value):
         if isinstance(value, list):
             return value[0] if value else ""
@@ -92,17 +121,6 @@ def webhook():
     if year:
         year = year[:4]  # handle full date format
 
-
-    # # Extract parameters
-    # country_input = params.get("geo-country", [None])[0] if params.get("geo-country") else None
-    # disease = params.get("disease") or ""
-    # data_type = params.get("data_type") or ""
-    # indicator = params.get("indicator") or ""
-    # year = params.get("year") or ""
-
-    # if year:
-    #     year = year[:4]  # handle full date format
-
     # Normalize country name using aliases
     country_key = COUNTRY_ALIASES.get(country_input.lower(), country_input.lower()) if country_input else None
     country_code = COUNTRY_MAP.get(country_key) if country_key else None
@@ -116,10 +134,16 @@ def webhook():
         else:
             key = f"{disease.lower()}_{data_type.lower()}"
             indicator_code = INDICATOR_MAP.get(key)
-            if indicator_code:
-                response_text = fetch_who_data(indicator_code, country_code, year)
+
+            # If not in static map, try dynamic lookup
+            if not indicator_code:
+                indicator_code, err = get_indicator_code_from_disease(disease, data_type)
+                if not indicator_code:
+                    response_text = err or f"No indicator found for {disease} ({data_type})."
+                else:
+                    response_text = fetch_who_data(indicator_code, country_code, year)
             else:
-                response_text = f"No indicator found for {key}."
+                response_text = fetch_who_data(indicator_code, country_code, year)
 
     # -------- Get General Indicator Data --------
     elif intent_name == "get_indicator_data":
@@ -127,10 +151,14 @@ def webhook():
             response_text = "Please provide indicator, country, and year."
         else:
             indicator_code = INDICATOR_MAP.get(indicator.lower())
-            if indicator_code:
-                response_text = fetch_who_data(indicator_code, country_code, year)
+            if not indicator_code:
+                indicator_code, err = get_indicator_code_from_disease(indicator)
+                if not indicator_code:
+                    response_text = err or f"No indicator found for {indicator}."
+                else:
+                    response_text = fetch_who_data(indicator_code, country_code, year)
             else:
-                response_text = f"No indicator found for {indicator}."
+                response_text = fetch_who_data(indicator_code, country_code, year)
 
     # -------- Get Disease Overview --------
     elif intent_name == "get_disease_overview":
