@@ -76,15 +76,32 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     params = req["queryResult"].get("parameters", {})
 
-    # Extract parameters
-    country_input = params.get("geo-country", [None])[0] if params.get("geo-country") else None
-    disease = params.get("disease") or ""
-    data_type = params.get("data_type") or ""
-    indicator = params.get("indicator") or ""
-    year = params.get("year") or ""
+        # -------- Helper to normalize params --------
+def normalize_param(value):
+    if isinstance(value, list):
+        return value[0] if value else ""
+    return value or ""
+
+    # Extract parameters safely
+    country_input = normalize_param(params.get("geo-country"))
+    disease = normalize_param(params.get("disease"))
+    data_type = normalize_param(params.get("data_type"))
+    indicator = normalize_param(params.get("indicator"))
+    year = normalize_param(params.get("year"))
 
     if year:
         year = year[:4]  # handle full date format
+
+
+    # # Extract parameters
+    # country_input = params.get("geo-country", [None])[0] if params.get("geo-country") else None
+    # disease = params.get("disease") or ""
+    # data_type = params.get("data_type") or ""
+    # indicator = params.get("indicator") or ""
+    # year = params.get("year") or ""
+
+    # if year:
+    #     year = year[:4]  # handle full date format
 
     # Normalize country name using aliases
     country_key = COUNTRY_ALIASES.get(country_input.lower(), country_input.lower()) if country_input else None
