@@ -311,6 +311,11 @@ def webhook():
     params = req["queryResult"].get("parameters", {})
     disease = params.get("disease", "").lower()
 
+    # --------- Dynamic Data: WHO Outbreaks ---------
+    req = request.get_json(silent=True, force=True)
+    intent = req.get('queryResult', {}).get('intent', {}).get('displayName', '')
+    params = req.get('queryResult', {}).get('parameters', {})
+
     response_text = "Sorry, I don't understand your request."
 
     if intent_name == "get_disease_overview":
@@ -361,13 +366,14 @@ def webhook():
             response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
             
     # return jsonify({"fulfillmentText": response_text})
-     # --------- Dynamic Data: WHO Outbreaks ---------
+    # --------- Dynamic Data: WHO Outbreaks ---------
     elif intent == 'disease_outbreak.general':
         outbreaks = get_who_outbreak_data()
         if not outbreaks:
             response_text = "⚠️ Unable to fetch outbreak data right now."
         else:
             response_text = "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
+
 
     return jsonify({"fulfillmentText": response_text})
 
