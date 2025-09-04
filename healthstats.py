@@ -58,7 +58,43 @@ def fetch_overview(url):
         return None
 
 # -------- Helper Function: Fetch Symptoms --------
-def fetch_symptoms(url):
+# def fetch_symptoms(url):
+#     try:
+#         r = requests.get(url, timeout=10)
+#         r.raise_for_status()
+#         soup = BeautifulSoup(r.text, "html.parser")
+
+#         # Find the heading containing "Symptoms" or "Signs and symptoms"
+#         heading = soup.find(
+#             lambda tag: tag.name in ["h2", "h3"] 
+#             and ("symptoms" in tag.get_text(strip=True).lower() 
+#                  or "signs and symptoms" in tag.get_text(strip=True).lower())
+#         )
+#         if not heading:
+#             return None
+
+#         # Collect all <p> or <li> until next heading
+#         points = []
+#         for sibling in heading.find_next_siblings():
+#             if sibling.name in ["h2", "h3"]:
+#                 break
+#             if sibling.name == "p":
+#                 text = sibling.get_text(strip=True)
+#                 if text:
+#                     points.append(text)
+#             elif sibling.name == "ul":  # bullet points
+#                 for li in sibling.find_all("li"):
+#                     li_text = li.get_text(strip=True)
+#                     if li_text:
+#                         points.append(f"- {li_text}")
+
+#         if points:
+#             return "\n".join(points)
+#         return None
+#     except Exception as e:
+#         return None
+
+def fetch_symptoms(url, disease):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
@@ -81,7 +117,7 @@ def fetch_symptoms(url):
             if sibling.name == "p":
                 text = sibling.get_text(strip=True)
                 if text:
-                    points.append(text)
+                    points.append(f"- {text}")
             elif sibling.name == "ul":  # bullet points
                 for li in sibling.find_all("li"):
                     li_text = li.get_text(strip=True)
@@ -89,10 +125,11 @@ def fetch_symptoms(url):
                         points.append(f"- {li_text}")
 
         if points:
-            return "\n".join(points)
+            return f"The common symptoms of {disease.capitalize()} are:\n" + "\n".join(points)
         return None
     except Exception as e:
         return None
+
 
 
 # -------- Flask webhook route --------
