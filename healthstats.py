@@ -156,7 +156,7 @@ def webhook():
     elif intent_name == "get_symptoms":
         url = DISEASE_OVERVIEWS.get(disease)   # use same mapping
         if url:
-            symptoms = fetch_symptoms(url)
+            symptoms = fetch_symptoms(url, disease)
             if symptoms:
                 response_text = f"Here are the symptoms of {disease.capitalize()}:\n{symptoms}"
             else:
