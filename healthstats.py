@@ -123,6 +123,39 @@ def fetch_treatment(url, disease):
     except Exception:
         return None
 
+# -------- Helper Function: Fetch Prevention --------
+def fetch_prevention(url, disease):
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # Find the heading containing "Prevention"
+        heading = soup.find(
+            lambda tag: tag.name in ["h2", "h3"] 
+            and "prevention" in tag.get_text(strip=True).lower()
+        )
+        if not heading:
+            return None
+
+        # Collect only bullet points (unordered list) until next heading
+        points = []
+        for sibling in heading.find_next_siblings():
+            if sibling.name in ["h2", "h3"]:
+                break
+            if sibling.name == "ul":  # unordered list
+                for li in sibling.find_all("li"):
+                    li_text = li.get_text(strip=True)
+                    if li_text:
+                        points.append(f"- {li_text}")
+
+        if points:
+            return f"The common prevention methods for {disease.capitalize()} are:\n" + "\n".join(points)
+        return None
+    except Exception as e:
+        return None
+
+
 
 # -------- Helper Function: Fetch Symptoms --------
 # def fetch_symptoms(url):
@@ -279,6 +312,18 @@ def webhook():
         else:
             response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
 
+    # return jsonify({"fulfillmentText": response_text})
+    elif intent_name == "get_prevention":
+        url = DISEASE_OVERVIEWS.get(disease)
+        if url:
+            prevention = fetch_prevention(url, disease)
+            if prevention:
+                response_text = prevention
+            else:
+                response_text = f"Prevention methods not found for {disease.capitalize()}. You can read more here: {url}"
+        else:
+            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+            
     return jsonify({"fulfillmentText": response_text})
 
 
