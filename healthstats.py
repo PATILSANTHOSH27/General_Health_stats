@@ -391,8 +391,13 @@ from huggingface_hub import InferenceClient
 app = Flask(__name__)
 
 # -------- Hugging Face Client --------
-HF_API_KEY = "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"  # <-- replace with your key
-client = InferenceClient(api_key=HF_API_KEY)
+# HF_API_KEY = "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"  # <-- replace with your key
+# client = InferenceClient(api_key=HF_API_KEY)
+import os
+from huggingface_hub import InferenceClient
+
+client = InferenceClient(token=os.environ.get("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"))
+
 
 # -------- Translation Helper Function --------
 def translate_text(text, source_lang, target_lang):
