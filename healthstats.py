@@ -113,13 +113,13 @@ def webhook():
                 response_text = f"Overview not found for {disease.capitalize()}. You can read more here: {url}"
         else:
             response_text = f"Disease not found. Make sure to use a valid disease name."
-    # else:
-    #     response_text = "Sorry, I don't understand your request."
+    else:
+        response_text = "Sorry, I don't understand your request."
 
     return jsonify({"fulfillmentText": response_text})
 
     # -------- Get Symptoms --------
-    elif intent_name == "get_symptoms":
+    if intent_name == "get_symptoms":
         if disease:
             url = DISEASE_URLS.get(disease.lower())
             if url:
@@ -132,7 +132,10 @@ def webhook():
                 response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
         else:
             response_text = "Please provide the disease name."
+    else:
+        response_text = "Sorry, I don't understand your request."
 
+    return jsonify({"fulfillmentText": response_text})
 
 if __name__ == '__main__':
     app.run(debug=True)
