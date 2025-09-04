@@ -130,6 +130,42 @@ def fetch_symptoms(url, disease):
     except Exception as e:
         return None
 
+# -------- Helper Function: Fetch Treatment --------
+def fetch_treatment(url, disease):
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # Find the heading containing "Treatment"
+        heading = soup.find(
+            lambda tag: tag.name in ["h2", "h3"]
+            and "treatment" in tag.get_text(strip=True).lower()
+        )
+        if not heading:
+            return None
+
+        # Collect all <p> or <li> until next heading
+        points = []
+        for sibling in heading.find_next_siblings():
+            if sibling.name in ["h2", "h3"]:
+                break
+            if sibling.name == "p":
+                text = sibling.get_text(strip=True)
+                if text:
+                    points.append(f"- {text}")
+            elif sibling.name == "ul":  # bullet points
+                for li in sibling.find_all("li"):
+                    li_text = li.get_text(strip=True)
+                    if li_text:
+                        points.append(f"- {li_text}")
+
+        if points:
+            return f"The common treatments for {disease.capitalize()} are:\n" + "\n".join(points)
+        return None
+    except Exception:
+        return None
+
 
 
 # -------- Flask webhook route --------
@@ -162,6 +198,18 @@ def webhook():
                 response_text = symptoms   # <-- FIXED (no duplicate intro)
             else:
                 response_text = f"Symptoms not found for {disease.capitalize()}. You can read more here: {url}"
+        else:
+            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+
+    # return jsonify({"fulfillmentText": response_text})
+    elif intent_name == "get_treatment":
+        url = DISEASE_OVERVIEWS.get(disease)
+        if url:
+            treatment = fetch_treatment(url, disease)
+            if treatment:
+                response_text = treatment
+            else:
+                response_text = f"Treatment details not found for {disease.capitalize()}. You can read more here: {url}"
         else:
             response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
 
