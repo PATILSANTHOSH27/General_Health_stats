@@ -103,6 +103,8 @@ def webhook():
     params = req["queryResult"].get("parameters", {})
     disease = params.get("disease", "").lower()
 
+    response_text = "Sorry, I don't understand your request."
+
     if intent_name == "get_disease_overview":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
@@ -113,29 +115,20 @@ def webhook():
                 response_text = f"Overview not found for {disease.capitalize()}. You can read more here: {url}"
         else:
             response_text = f"Disease not found. Make sure to use a valid disease name."
-    else:
-        response_text = "Sorry, I don't understand your request."
 
-    return jsonify({"fulfillmentText": response_text})
-
-    # -------- Get Symptoms --------
-    if intent_name == "get_symptoms":
-        if disease:
-            url = DISEASE_URLS.get(disease.lower())
-            if url:
-                symptoms = fetch_symptoms(url)
-                if symptoms:
-                    response_text = f"Here are the symptoms of {disease.capitalize()}:\n{symptoms}"
-                else:
-                    response_text = f"Symptoms not found for {disease.capitalize()}. You can read more here: {url}"
+    elif intent_name == "get_symptoms":
+        url = DISEASE_OVERVIEWS.get(disease)   # use same mapping
+        if url:
+            symptoms = fetch_symptoms(url)
+            if symptoms:
+                response_text = f"Here are the symptoms of {disease.capitalize()}:\n{symptoms}"
             else:
-                response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+                response_text = f"Symptoms not found for {disease.capitalize()}. You can read more here: {url}"
         else:
-            response_text = "Please provide the disease name."
-    else:
-        response_text = "Sorry, I don't understand your request."
+            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
 
     return jsonify({"fulfillmentText": response_text})
+
 
 if __name__ == '__main__':
     app.run(debug=True)
