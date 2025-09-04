@@ -365,11 +365,11 @@ def webhook():
     elif intent == 'disease_outbreak.general':
         outbreaks = get_who_outbreak_data()
         if not outbreaks:
-            reply = "⚠️ Unable to fetch outbreak data right now."
+            response_text = "⚠️ Unable to fetch outbreak data right now."
         else:
-            reply = "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
+            response_text = "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
 
-    return jsonify({'fulfillmentText': reply})
+    return jsonify({"fulfillmentText": response_text})
 
 
 if __name__ == '__main__':
