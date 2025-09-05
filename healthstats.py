@@ -389,46 +389,40 @@ import os
 
 app = Flask(__name__)
 
-# ✅ Load Sarvam API key from Render environment variable
+# ✅ Load Sarvam API key from environment variable
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
 SARVAM_TRANSLATE_URL = "https://api.sarvam.ai/translate"
 
 # -------- Translation Helpers --------
-def detect_and_translate_to_english(text):
-    """Detects input language and translates to English if needed."""
-    headers = {
-        "Authorization": f"Bearer {SARVAM_API_KEY}",
-        "Content-Type": "application/json"
-    }
+def translate_to_english(text):
+    """Translate any language text to English."""
+    headers = {"Authorization": f"Bearer {SARVAM_API_KEY}", "Content-Type": "application/json"}
     payload = {"text": text, "target_language": "en"}
     try:
-        response = requests.post(SARVAM_TRANSLATE_URL, json=payload, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        resp = requests.post(SARVAM_TRANSLATE_URL, json=payload, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
         return data.get("translated_text", text), data.get("detected_source_language", "en")
     except Exception as e:
         print(f"Translation to English failed: {e}")
         return text, "en"
 
 def translate_from_english(text, target_lang):
-    """Translates English response back to user’s original language."""
+    """Translate English text back to user language."""
     if target_lang == "en":
         return text
-    headers = {
-        "Authorization": f"Bearer {SARVAM_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {SARVAM_API_KEY}", "Content-Type": "application/json"}
     payload = {"text": text, "target_language": target_lang}
     try:
-        response = requests.post(SARVAM_TRANSLATE_URL, json=payload, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        resp = requests.post(SARVAM_TRANSLATE_URL, json=payload, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
         return data.get("translated_text", text)
     except Exception as e:
         print(f"Translation from English failed: {e}")
         return text
 
-# -------- Disease Overview URLs --------
+# -------- Static mapping of diseases to WHO URLs --------
 DISEASE_OVERVIEWS = {
     "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
     "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
@@ -452,85 +446,69 @@ DISEASE_OVERVIEWS = {
     "lyme disease": "https://www.who.int/news-room/fact-sheets/detail/lyme-disease",
 }
 
-# -------- Helper functions to fetch content --------
+# -------- Helper: Fetch Overview, Symptoms, Treatment, Prevention --------
 def fetch_overview(url):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "overview" in tag.get_text(strip=True).lower())
-        if not heading:
-            return None
-        paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name=="p"]
+        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and "overview" in tag.get_text(strip=True).lower())
+        if not heading: return None
+        paragraphs = []
+        for sibling in heading.find_next_siblings():
+            if sibling.name in ["h2","h3"]: break
+            if sibling.name == "p": paragraphs.append(sibling.get_text(strip=True))
         return " ".join(paragraphs) if paragraphs else None
-    except Exception:
-        return None
+    except: return None
 
-def fetch_list_section(url, keyword, disease, title_prefix):
+def fetch_section_bullets(url, section_name, disease):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and keyword in tag.get_text(strip=True).lower())
-        if not heading:
-            return None
+        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and section_name in tag.get_text(strip=True).lower())
+        if not heading: return None
         points = []
-        for sib in heading.find_next_siblings():
-            if sib.name in ["h2", "h3"]:
-                break
-            if sib.name == "ul":
-                for li in sib.find_all("li"):
-                    li_text = li.get_text(strip=True)
-                    if li_text:
-                        points.append(f"- {li_text}")
-        return f"{title_prefix} {disease.capitalize()}:\n" + "\n".join(points) if points else None
-    except Exception:
+        for sibling in heading.find_next_siblings():
+            if sibling.name in ["h2","h3"]: break
+            if sibling.name == "ul":
+                for li in sibling.find_all("li"):
+                    text = li.get_text(strip=True)
+                    if text: points.append(f"- {text}")
+        if points:
+            return f"The common {section_name} of {disease.capitalize()} are:\n" + "\n".join(points)
         return None
+    except: return None
 
-def fetch_symptoms(url, disease):
-    return fetch_list_section(url, "symptoms", disease, "The common symptoms of")
-
-def fetch_treatment(url, disease):
-    return fetch_list_section(url, "treatment", disease, "The common treatments for")
-
-def fetch_prevention(url, disease):
-    return fetch_list_section(url, "prevention", disease, "The common prevention methods for")
-
-# -------- Flask webhook route --------
+# -------- Webhook route --------
 @app.route('/webhook', methods=['POST'])
 def webhook():
     req = request.get_json()
     intent_name = req["queryResult"]["intent"]["displayName"]
-    query_text = req["queryResult"].get("queryText", "")
+    disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # Step 1: Translate user query to English
-    translated_text, user_lang = detect_and_translate_to_english(query_text)
-
-    # Step 2: Map translated query to English disease
-    disease = ""
-    for key in DISEASE_OVERVIEWS.keys():
-        if key in translated_text.lower():
-            disease = key
-            break
+    # 🌍 Step 1: Translate disease to English
+    disease_en, user_lang = translate_to_english(disease_param.lower())
 
     response_text = "Sorry, I don't understand your request."
+    url = DISEASE_OVERVIEWS.get(disease_en)
 
-    # Step 3: Call appropriate fetch function
-    url = DISEASE_OVERVIEWS.get(disease)
-    if intent_name == "get_disease_overview" and url:
-        overview = fetch_overview(url)
-        response_text = overview if overview else f"Overview not found for {disease.capitalize()}."
-    elif intent_name == "get_symptoms" and url:
-        response_text = fetch_symptoms(url, disease) or f"Symptoms not found for {disease.capitalize()}."
-    elif intent_name == "get_treatment" and url:
-        response_text = fetch_treatment(url, disease) or f"Treatment details not found for {disease.capitalize()}."
-    elif intent_name == "get_prevention" and url:
-        response_text = fetch_prevention(url, disease) or f"Prevention details not found for {disease.capitalize()}."
-    elif not url:
-        response_text = f"Disease '{disease}' not found in database."
+    if not url:
+        response_text = f"Disease '{disease_param}' not found in database."
+    else:
+        if intent_name == "get_disease_overview":
+            overview = fetch_overview(url)
+            response_text = overview if overview else f"Overview not found for {disease_param}."
+        elif intent_name == "get_symptoms":
+            response_text = fetch_section_bullets(url, "symptoms", disease_en) or f"Symptoms not found for {disease_param}."
+        elif intent_name == "get_treatment":
+            response_text = fetch_section_bullets(url, "treatment", disease_en) or f"Treatment not found for {disease_param}."
+        elif intent_name == "get_prevention":
+            response_text = fetch_section_bullets(url, "prevention", disease_en) or f"Prevention not found for {disease_param}."
 
-    # Step 4: Translate response back to user language
+    # 🌍 Step 2: Translate response back to user language
     final_response = translate_from_english(response_text, user_lang)
+
     return jsonify({"fulfillmentText": final_response})
 
 if __name__ == '__main__':
