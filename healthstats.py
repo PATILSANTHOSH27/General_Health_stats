@@ -386,27 +386,46 @@ from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
 import os
-from sarvamai import SarvamAI
+
 
 app = Flask(__name__)
 
 # -------- Initialize Sarvam client --------
-SARVAM_API_KEY = os.getenv("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")
-sarvam_client = SarvamAI(api_subscription_key=SARVAM_API_KEY)
 
-def translate_text(text, source_lang="auto", target_lang="en-IN"):
-    """Translate text using Sarvam API"""
+
+SARVAM_API_URL = "https://api.sarvam.ai/translate"
+SARVAM_API_KEY = os.getenv("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")  # will load from Render env var
+
+def detect_language(text):
     try:
-        response = sarvam_client.text.translate(
-            input=text,
-            source_language_code=source_lang,
-            target_language_code=target_lang,
-            model="sarvam-translate:v1"
+        resp = requests.post(
+            f"{SARVAM_API_URL}/detect",
+            headers={"Authorization": f"Bearer {SARVAM_API_KEY}"},
+            json={"text": text}
         )
-        return response.get("translated_text", text), response.get("source_language_code", "en-IN")
+        if resp.status_code == 200:
+            return resp.json().get("language", "en")
     except Exception as e:
-        print("Translation error:", e)
-        return text, "en-IN"
+        print(f"Language detection error: {e}")
+    return "en"
+
+def translate_text(text, source_lang, target_lang):
+    try:
+        resp = requests.post(
+            f"{SARVAM_API_URL}/translate",
+            headers={"Authorization": f"Bearer {SARVAM_API_KEY}"},
+            json={
+                "text": text,
+                "source_language": source_lang,
+                "target_language": target_lang
+            }
+        )
+        if resp.status_code == 200:
+            return resp.json().get("translated_text", text)
+    except Exception as e:
+        print(f"Translation error: {e}")
+    return text
+
 
 
 # -------- Static mapping of diseases to WHO fact sheet URLs --------
