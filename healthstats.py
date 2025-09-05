@@ -547,68 +547,127 @@ def get_who_outbreak_data():
 # ================= FLASK WEBHOOK =================
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    req = request.get_json()
+    req = request.get_json(silent=True, force=True)
+    query_text = req.get("queryResult", {}).get("queryText", "")
+
+    # Step 1: Detect user language
+    user_lang = detect_language(query_text)
+    print(f"Detected language: {user_lang}")
+
+    # Step 2: Translate query text to English if needed
+    query_in_english = query_text
+    if user_lang != "en":
+        query_in_english = translate_text(query_text, user_lang, "en")
+
+    # Step 3: Extract intent + parameters
     intent_name = req["queryResult"]["intent"]["displayName"]
     params = req["queryResult"].get("parameters", {})
     disease = params.get("disease", "").lower()
-    user_text = req["queryResult"].get("queryText", "")
 
-    # Detect user language
-    try:
-        user_lang = detect(user_text)
-    except:
-        user_lang = "en"
+    # Step 3.1: If disease is not English, translate it
+    if disease and user_lang != "en":
+        disease_translated = translate_text(disease, user_lang, "en").lower()
+        print(f"Translated disease: {disease} → {disease_translated}")
+        disease = disease_translated
 
     response_text = "Sorry, I don't understand your request."
 
+    # --------- Disease Overview ---------
     if intent_name == "get_disease_overview":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
             overview = fetch_overview(url)
-            response_text = overview or f"Overview not found for {disease.capitalize()}. You can read more here: {url}"
-        else:
-            response_text = f"Disease not found. Make sure to use a valid disease name."
+            response_text = overview or f"Overview not found for {disease.capitalize()}.\nRead more: {url}"
 
     elif intent_name == "get_symptoms":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
-            symptoms = fetch_symptoms(url, disease)
-            response_text = symptoms or f"Symptoms not found for {disease.capitalize()}. You can read more here: {url}"
-        else:
-            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+            response_text = fetch_symptoms(url, disease) or f"Symptoms not found for {disease.capitalize()}.\nRead more: {url}"
 
     elif intent_name == "get_treatment":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
-            treatment = fetch_treatment(url, disease)
-            response_text = treatment or f"Treatment details not found for {disease.capitalize()}. You can read more here: {url}"
-        else:
-            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+            response_text = fetch_treatment(url, disease) or f"Treatment not found for {disease.capitalize()}.\nRead more: {url}"
 
     elif intent_name == "get_prevention":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
-            prevention = fetch_prevention(url, disease)
-            response_text = prevention or f"Prevention methods not found for {disease.capitalize()}. You can read more here: {url}"
-        else:
-            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+            response_text = fetch_prevention(url, disease) or f"Prevention not found for {disease.capitalize()}.\nRead more: {url}"
 
     elif intent_name == "disease_outbreak.general":
         outbreaks = get_who_outbreak_data()
-        if not outbreaks:
-            response_text = "⚠️ Unable to fetch outbreak data right now."
-        else:
-            response_text = "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
+        response_text = "⚠️ Unable to fetch outbreak data." if not outbreaks else "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
 
-    # Translate back if needed
+    # Step 4: Translate response back into user’s language if needed
     if user_lang != "en":
-        response_text = systran_translate_text(response_text, "en", user_lang)
+        response_text = translate_text(response_text, "en", user_lang)
 
     return jsonify({"fulfillmentText": response_text})
 
+# @app.route('/webhook', methods=['POST'])
+# def webhook():
+#     req = request.get_json()
+#     intent_name = req["queryResult"]["intent"]["displayName"]
+#     params = req["queryResult"].get("parameters", {})
+#     disease = params.get("disease", "").lower()
+#     user_text = req["queryResult"].get("queryText", "")
 
-if __name__ == '__main__':
-    app.run(debug=True)
+#     # Detect user language
+#     try:
+#         user_lang = detect(user_text)
+#     except:
+#         user_lang = "en"
+
+#     response_text = "Sorry, I don't understand your request."
+
+#     if intent_name == "get_disease_overview":
+#         url = DISEASE_OVERVIEWS.get(disease)
+#         if url:
+#             overview = fetch_overview(url)
+#             response_text = overview or f"Overview not found for {disease.capitalize()}. You can read more here: {url}"
+#         else:
+#             response_text = f"Disease not found. Make sure to use a valid disease name."
+
+#     elif intent_name == "get_symptoms":
+#         url = DISEASE_OVERVIEWS.get(disease)
+#         if url:
+#             symptoms = fetch_symptoms(url, disease)
+#             response_text = symptoms or f"Symptoms not found for {disease.capitalize()}. You can read more here: {url}"
+#         else:
+#             response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+
+#     elif intent_name == "get_treatment":
+#         url = DISEASE_OVERVIEWS.get(disease)
+#         if url:
+#             treatment = fetch_treatment(url, disease)
+#             response_text = treatment or f"Treatment details not found for {disease.capitalize()}. You can read more here: {url}"
+#         else:
+#             response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+
+#     elif intent_name == "get_prevention":
+#         url = DISEASE_OVERVIEWS.get(disease)
+#         if url:
+#             prevention = fetch_prevention(url, disease)
+#             response_text = prevention or f"Prevention methods not found for {disease.capitalize()}. You can read more here: {url}"
+#         else:
+#             response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+
+#     elif intent_name == "disease_outbreak.general":
+#         outbreaks = get_who_outbreak_data()
+#         if not outbreaks:
+#             response_text = "⚠️ Unable to fetch outbreak data right now."
+#         else:
+#             response_text = "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
+
+#     # Translate back if needed
+#     if user_lang != "en":
+#         response_text = systran_translate_text(response_text, "en", user_lang)
+
+#     return jsonify({"fulfillmentText": response_text})
+
+
+# if __name__ == '__main__':
+#     app.run(debug=True)
 
 
 
