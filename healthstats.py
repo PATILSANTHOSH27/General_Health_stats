@@ -427,18 +427,20 @@ def fetch_overview(url):
 
 # ----------------- Gemini LLM REST Call -----------------
 def gemini_api(prompt):
-    """Call Gemini LLM via REST API with API key (like OpenAI API)."""
+    """
+    Call Gemini LLM via REST API with API key in query parameters.
+    """
     url = "https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateText"
+    params = {"key": GEMINI_API_KEY}  # API key here
     headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {GEMINI_API_KEY}"
+        "Content-Type": "application/json"
     }
     payload = {
         "prompt": {"text": prompt},
         "temperature": 0.0,
         "maxOutputTokens": 512
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=30)
+    response = requests.post(url, headers=headers, params=params, json=payload, timeout=30)
     response.raise_for_status()
     result = response.json()
     return result["candidates"][0]["content"]
@@ -495,7 +497,7 @@ def webhook():
         if intent_name == "get_disease_overview":
             overview = fetch_overview(url)
             response_text = overview or f"Overview not found for {disease_param}."
-        # Additional intents like get_symptoms, get_treatment, get_prevention can be added here
+        # You can add more intents like get_symptoms, get_treatment, get_prevention here
 
     # Translate response back to user language
     final_response = translate_from_english(response_text, user_lang)
@@ -504,13 +506,3 @@ def webhook():
 # ----------------- Run App -----------------
 if __name__ == '__main__':
     app.run(debug=True)
-
-
-
-
-
-
-
-
-
-
