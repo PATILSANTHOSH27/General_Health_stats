@@ -525,7 +525,7 @@ app = Flask(__name__)
 # -------------------
 # Devnagri API Key
 # -------------------
-DEVNAGRI_API_KEY = os.getenv("DEVNAGRI_API_KEY")  # store your API key in environment variable
+DEVNAGRI_API_KEY = os.getenv("DEVNAGRI_API_KEY")  # set your key in environment
 DEVNAGRI_API_URL = "https://api.devnagri.com/machine-translation/v2/translate"
 
 # -------------------
@@ -533,7 +533,7 @@ DEVNAGRI_API_URL = "https://api.devnagri.com/machine-translation/v2/translate"
 # -------------------
 def translate_text_devnagri(text, src_lang="auto", dest_lang="en"):
     """
-    Translate text using Devnagri API.
+    Translate text using Devnagri v2 API with multipart/form-data.
     """
     try:
         data = {
@@ -544,7 +544,7 @@ def translate_text_devnagri(text, src_lang="auto", dest_lang="en"):
             "industry": "5",
             "is_apply_glossary": "1"
         }
-        response = requests.post(DEVNAGRI_API_URL, data=data, timeout=10)
+        response = requests.post(DEVNAGRI_API_URL, files=data, timeout=15)
         response.raise_for_status()
         return response.json().get("translated_sentence", text)
     except Exception as e:
@@ -552,21 +552,9 @@ def translate_text_devnagri(text, src_lang="auto", dest_lang="en"):
         return text
 
 def translate_to_english(text):
-    """
-    Translate any language text to English and detect original language.
-    """
-    try:
-        translated = translate_text_devnagri(text, src_lang="auto", dest_lang="en")
-        # Note: Devnagri API does not always return detected language, default to "auto"
-        detected_lang = "auto"
-        return translated, detected_lang
-    except:
-        return text, "en"
+    return translate_text_devnagri(text, src_lang="auto", dest_lang="en"), "auto"
 
 def translate_from_english(text, target_lang):
-    """
-    Translate English text to user language.
-    """
     if target_lang in ["en", "auto"]:
         return text
     return translate_text_devnagri(text, src_lang="en", dest_lang=target_lang)
