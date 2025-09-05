@@ -525,39 +525,45 @@ app = Flask(__name__)
 # -------------------
 # Devnagri API Key
 # -------------------
-DEVNAGRI_API_KEY = os.getenv("DEVNAGRI_API_KEY")  # set your key in environment
+DEVNAGRI_API_KEY = os.getenv("DEVNAGRI_API_KEY")
 DEVNAGRI_API_URL = "https://api.devnagri.com/machine-translation/v2/translate"
 
 # -------------------
-# Translation Functions
+# Translation Function (to English only)
 # -------------------
-def translate_text_devnagri(text, src_lang="auto", dest_lang="en"):
+def translate_to_english(disease_param):
     """
-    Translate text using Devnagri v2 API with multipart/form-data.
+    Translate the disease name to English using Devnagri API.
+    Returns the original text if API fails.
     """
+    if not disease_param.strip():
+        return disease_param
+    data = {
+        "key": DEVNAGRI_API_KEY,
+        "sentence": disease_param,
+        "src_lang": "auto",
+        "dest_lang": "en",
+        "industry": "5",
+        "is_apply_glossary": "1"
+    }
     try:
-        data = {
-            "key": DEVNAGRI_API_KEY,
-            "sentence": text,
-            "src_lang": src_lang,
-            "dest_lang": dest_lang,
-            "industry": "5",
-            "is_apply_glossary": "1"
-        }
-        response = requests.post(DEVNAGRI_API_URL, files=data, timeout=15)
+        response = requests.post(DEVNAGRI_API_URL, data=data, timeout=15)
+
+        # Handle server errors gracefully
+        if response.status_code >= 500:
+            print(f"Devnagri server error {response.status_code}, returning original text.")
+            return disease_param
+
+        # Handle bad request (400)
+        if response.status_code == 400:
+            print(f"Devnagri bad request 400, returning original text. Response: {response.text}")
+            return disease_param
+
         response.raise_for_status()
-        return response.json().get("translated_sentence", text)
+        return response.json().get("translated_sentence", disease_param)
     except Exception as e:
-        print(f"Translation failed: {e}")
-        return text
-
-def translate_to_english(text):
-    return translate_text_devnagri(text, src_lang="auto", dest_lang="en"), "auto"
-
-def translate_from_english(text, target_lang):
-    if target_lang in ["en", "auto"]:
-        return text
-    return translate_text_devnagri(text, src_lang="en", dest_lang=target_lang)
+        print(f"Translation failed: {e}. Returning original text.")
+        return disease_param
 
 # -------------------
 # Disease Data Mapping
@@ -591,7 +597,7 @@ def fetch_overview(url):
     except:
         return None
 
-def fetch_content(url, disease, keyword):
+def fetch_content(url, disease_param, keyword):
     """
     Generic fetcher for symptoms, treatment, prevention.
     Tries <ul> first, then falls back to <p>.
@@ -628,7 +634,7 @@ def fetch_content(url, disease, keyword):
             points = paragraphs
 
         if points:
-            return f"The {keyword} of {disease.capitalize()} are:\n" + "\n".join(points)
+            return f"The {keyword} of {disease_param.capitalize()} are:\n" + "\n".join(points)
         return None
     except Exception as e:
         print(f"fetch_content error ({keyword}): {e}")
@@ -643,13 +649,15 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # Translate disease to English
-    disease_en, user_lang = translate_to_english(disease_param.lower())
+    # Translate disease to English (send original multilingual text to Devnagri)
+    disease_en = translate_to_english(disease_param)
+
+    # Use lowercase only for dictionary lookup
+    url = DISEASE_OVERVIEWS.get(disease_en.lower())
     response_text = "Sorry, I don't understand your request."
 
-    url = DISEASE_OVERVIEWS.get(disease_en)
     if not url:
-        response_text = f"Disease '{disease_param}' not found in database."
+        response_text = f"Disease '{disease_en}' not found in database."
     else:
         if intent_name == "get_disease_overview":
             overview = fetch_overview(url)
@@ -661,9 +669,9 @@ def webhook():
         elif intent_name == "get_prevention":
             response_text = fetch_content(url, disease_en, "prevention") or f"Prevention not found for {disease_param}."
 
-    # Translate back to user language
-    final_response = translate_from_english(response_text, user_lang)
-    return jsonify({"fulfillmentText": final_response})
+    # Return response as-is, no translation back
+    return jsonify({"fulfillmentText": response_text})
 
 if __name__ == '__main__':
     app.run(debug=True)
+
