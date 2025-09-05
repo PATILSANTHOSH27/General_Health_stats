@@ -388,85 +388,22 @@ from bs4 import BeautifulSoup
 import os
 import openai
 import json
-import re
 
 app = Flask(__name__)
 
-# Load OpenAI API key from Render environment
+# ✅ Load OpenAI API key from Render environment variable
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# -------- Disease Data Mapping --------
-DISEASE_OVERVIEWS = {
-    "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
-    "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
-    "dengue": "https://www.who.int/news-room/fact-sheets/detail/dengue-and-severe-dengue",
-    "hiv": "https://www.who.int/news-room/fact-sheets/detail/hiv-aids",
-    "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
-    # Add more diseases as needed
-}
-
-# -------- Fetch Helpers --------
-def fetch_overview(url):
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "overview" in tag.get_text(strip=True).lower())
-        if not heading:
-            return None
-        paragraphs = []
-        for sibling in heading.find_next_siblings():
-            if sibling.name in ["h2", "h3"]:
-                break
-            if sibling.name == "p":
-                text = sibling.get_text(strip=True)
-                if text:
-                    paragraphs.append(text)
-        return " ".join(paragraphs) if paragraphs else None
-    except:
-        return None
-
-def fetch_list_section(url, section_name, disease):
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and section_name in tag.get_text(strip=True).lower())
-        if not heading:
-            return None
-        points = []
-        for sibling in heading.find_next_siblings():
-            if sibling.name in ["h2", "h3"]:
-                break
-            if sibling.name == "ul":
-                for li in sibling.find_all("li"):
-                    text = li.get_text(strip=True)
-                    if text:
-                        points.append(f"- {text}")
-        if not points:
-            return None
-        return f"The common {section_name} for {disease.capitalize()} are:\n" + "\n".join(points)
-    except:
-        return None
-
-# -------- OpenAI Translation Helpers --------
-def safe_json_parse(text):
-    """Extract JSON object from text safely"""
-    try:
-        # Remove any text before first { and after last }
-        match = re.search(r'\{.*\}', text, re.DOTALL)
-        if not match:
-            return {}
-        return json.loads(match.group())
-    except Exception:
-        return {}
-
+# -------- Translation Helpers using OpenAI --------
 def translate_to_english(text):
-    """Detect language and translate text to English"""
+    """
+    Detects language and translates input text to English.
+    Returns: (translated_text, detected_source_language)
+    """
     try:
         prompt = (
             f"Detect the language of this text and translate it to English. "
-            f"Respond strictly in JSON format like {{'text':'...','lang':'xx'}}.\n\nText: {text}"
+            f"Respond in JSON format with 'text' and 'lang'.\nText: {text}"
         )
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
@@ -474,18 +411,20 @@ def translate_to_english(text):
             temperature=0
         )
         content = response.choices[0].message.content
-        data = safe_json_parse(content)
+        data = json.loads(content)
         return data.get("text", text), data.get("lang", "en")
     except Exception as e:
         print(f"Translation to English failed: {e}")
         return text, "en"
 
 def translate_from_english(text, target_lang):
-    """Translate English text back to user's language"""
+    """
+    Translates English text back to the user language.
+    """
     if target_lang == "en":
         return text
     try:
-        prompt = f"Translate the following English text into {target_lang}:\n{text}"
+        prompt = f"Translate the following text from English to {target_lang}:\n{text}"
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
@@ -496,6 +435,41 @@ def translate_from_english(text, target_lang):
         print(f"Translation from English failed: {e}")
         return text
 
+# -------- Disease Data Mapping --------
+DISEASE_OVERVIEWS = {
+    "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
+    "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
+    "dengue": "https://www.who.int/news-room/fact-sheets/detail/dengue-and-severe-dengue",
+    "hiv": "https://www.who.int/news-room/fact-sheets/detail/hiv-aids",
+    "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
+}
+
+# -------- Fetch Helpers --------
+def fetch_section(url, section_name):
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and section_name in tag.get_text(strip=True).lower())
+        if not heading:
+            return None
+        points = []
+        for sibling in heading.find_next_siblings():
+            if sibling.name in ["h2","h3"]:
+                break
+            if sibling.name == "ul":
+                for li in sibling.find_all("li"):
+                    text = li.get_text(strip=True)
+                    if text:
+                        points.append(f"- {text}")
+            elif sibling.name == "p":
+                text = sibling.get_text(strip=True)
+                if text:
+                    points.append(text)
+        return " ".join(points) if points else None
+    except:
+        return None
+
 # -------- Webhook --------
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -503,7 +477,7 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # 1️⃣ Translate disease parameter to English
+    # Step 1: Translate disease param to English
     disease_en, user_lang = translate_to_english(disease_param.lower())
 
     response_text = "Sorry, I don't understand your request."
@@ -513,20 +487,21 @@ def webhook():
         response_text = f"Disease '{disease_param}' not found in database."
     else:
         if intent_name == "get_disease_overview":
-            response_text = fetch_overview(url) or f"Overview not found for {disease_param}."
+            response_text = fetch_section(url, "overview") or f"Overview not found for {disease_param}."
         elif intent_name == "get_symptoms":
-            response_text = fetch_list_section(url, "symptoms", disease_param) or f"Symptoms not found for {disease_param}."
+            response_text = fetch_section(url, "symptoms") or f"Symptoms not found for {disease_param}."
         elif intent_name == "get_treatment":
-            response_text = fetch_list_section(url, "treatment", disease_param) or f"Treatment not found for {disease_param}."
+            response_text = fetch_section(url, "treatment") or f"Treatment not found for {disease_param}."
         elif intent_name == "get_prevention":
-            response_text = fetch_list_section(url, "prevention", disease_param) or f"Prevention not found for {disease_param}."
+            response_text = fetch_section(url, "prevention") or f"Prevention not found for {disease_param}."
 
-    # 2️⃣ Translate response back to user's language
+    # Step 2: Translate response back to user's language
     final_response = translate_from_english(response_text, user_lang)
     return jsonify({"fulfillmentText": final_response})
 
 if __name__ == "__main__":
     app.run(debug=True)
+
 
 
 
