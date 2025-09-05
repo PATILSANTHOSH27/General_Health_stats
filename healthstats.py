@@ -389,7 +389,7 @@ import os
 
 app = Flask(__name__)
 
-# ✅ Load Sarvam API key from environment variable
+# ✅ Load Sarvam API key from Render environment variable
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
 SARVAM_TRANSLATE_URL = "https://api.sarvam.ai/translate"
 
@@ -401,41 +401,34 @@ def detect_and_translate_to_english(text):
         "Content-Type": "application/json"
     }
     payload = {"text": text, "target_language": "en"}
-
     try:
         response = requests.post(SARVAM_TRANSLATE_URL, json=payload, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
-        translated_text = data.get("translated_text", text)
-        detected_lang = data.get("detected_source_language", "en")
-        return translated_text, detected_lang
+        return data.get("translated_text", text), data.get("detected_source_language", "en")
     except Exception as e:
-        print(f"[❌] Translation to English failed: {e}")
-        return text, "en"  # fallback
-
+        print(f"Translation to English failed: {e}")
+        return text, "en"
 
 def translate_from_english(text, target_lang):
     """Translates English response back to user’s original language."""
     if target_lang == "en":
         return text
-
     headers = {
         "Authorization": f"Bearer {SARVAM_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {"text": text, "target_language": target_lang}
-
     try:
         response = requests.post(SARVAM_TRANSLATE_URL, json=payload, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
         return data.get("translated_text", text)
     except Exception as e:
-        print(f"[❌] Translation from English failed: {e}")
-        return text  # fallback
+        print(f"Translation from English failed: {e}")
+        return text
 
-
-# -------- Static mapping of diseases to WHO fact sheet URLs --------
+# -------- Disease Overview URLs --------
 DISEASE_OVERVIEWS = {
     "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
     "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
@@ -459,41 +452,49 @@ DISEASE_OVERVIEWS = {
     "lyme disease": "https://www.who.int/news-room/fact-sheets/detail/lyme-disease",
 }
 
-
-# -------- Scraping Helpers --------
-def fetch_section(url, keyword, prefix=None, disease=None):
+# -------- Helper functions to fetch content --------
+def fetch_overview(url):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
+        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "overview" in tag.get_text(strip=True).lower())
+        if not heading:
+            return None
+        paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name=="p"]
+        return " ".join(paragraphs) if paragraphs else None
+    except Exception:
+        return None
 
+def fetch_list_section(url, keyword, disease, title_prefix):
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
         heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and keyword in tag.get_text(strip=True).lower())
         if not heading:
             return None
-
-        points, paragraphs = [], []
-        for sibling in heading.find_next_siblings():
-            if sibling.name in ["h2", "h3"]:
+        points = []
+        for sib in heading.find_next_siblings():
+            if sib.name in ["h2", "h3"]:
                 break
-            if sibling.name == "ul":
-                for li in sibling.find_all("li"):
+            if sib.name == "ul":
+                for li in sib.find_all("li"):
                     li_text = li.get_text(strip=True)
                     if li_text:
                         points.append(f"- {li_text}")
-            elif sibling.name == "p":
-                text = sibling.get_text(strip=True)
-                if text:
-                    paragraphs.append(text)
-
-        if points:
-            return f"{prefix} {disease.capitalize()} are:\n" + "\n".join(points)
-        elif paragraphs:
-            return " ".join(paragraphs)
-        return None
-    except Exception as e:
-        print(f"[❌] Fetch failed: {e}")
+        return f"{title_prefix} {disease.capitalize()}:\n" + "\n".join(points) if points else None
+    except Exception:
         return None
 
+def fetch_symptoms(url, disease):
+    return fetch_list_section(url, "symptoms", disease, "The common symptoms of")
+
+def fetch_treatment(url, disease):
+    return fetch_list_section(url, "treatment", disease, "The common treatments for")
+
+def fetch_prevention(url, disease):
+    return fetch_list_section(url, "prevention", disease, "The common prevention methods for")
 
 # -------- Flask webhook route --------
 @app.route('/webhook', methods=['POST'])
@@ -502,41 +503,39 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     query_text = req["queryResult"].get("queryText", "")
 
-    # 🌍 Step 1: Translate incoming query to English
-    translated_query, user_lang = detect_and_translate_to_english(query_text)
+    # Step 1: Translate user query to English
+    translated_text, user_lang = detect_and_translate_to_english(query_text)
 
-    disease = req["queryResult"].get("parameters", {}).get("disease", "").lower()
+    # Step 2: Map translated query to English disease
+    disease = ""
+    for key in DISEASE_OVERVIEWS.keys():
+        if key in translated_text.lower():
+            disease = key
+            break
+
     response_text = "Sorry, I don't understand your request."
 
-    if disease in DISEASE_OVERVIEWS:
-        url = DISEASE_OVERVIEWS[disease]
+    # Step 3: Call appropriate fetch function
+    url = DISEASE_OVERVIEWS.get(disease)
+    if intent_name == "get_disease_overview" and url:
+        overview = fetch_overview(url)
+        response_text = overview if overview else f"Overview not found for {disease.capitalize()}."
+    elif intent_name == "get_symptoms" and url:
+        response_text = fetch_symptoms(url, disease) or f"Symptoms not found for {disease.capitalize()}."
+    elif intent_name == "get_treatment" and url:
+        response_text = fetch_treatment(url, disease) or f"Treatment details not found for {disease.capitalize()}."
+    elif intent_name == "get_prevention" and url:
+        response_text = fetch_prevention(url, disease) or f"Prevention details not found for {disease.capitalize()}."
+    elif not url:
+        response_text = f"Disease '{disease}' not found in database."
 
-        if intent_name == "get_disease_overview":
-            response_text = fetch_section(url, "overview") or f"Overview not found for {disease.capitalize()}."
-
-        elif intent_name == "get_symptoms":
-            response_text = fetch_section(url, "symptoms", "The common symptoms of", disease) \
-                            or f"Symptoms not found for {disease.capitalize()}."
-
-        elif intent_name == "get_treatment":
-            response_text = fetch_section(url, "treatment", "The common treatments for", disease) \
-                            or f"Treatment not found for {disease.capitalize()}."
-
-        elif intent_name == "get_prevention":
-            response_text = fetch_section(url, "prevention", "The common prevention methods for", disease) \
-                            or f"Prevention not found for {disease.capitalize()}."
-
-    else:
-        response_text = f"Sorry, I don't have information about {disease.capitalize()}."
-
-    # 🌍 Step 2: Translate response back to user language
+    # Step 4: Translate response back to user language
     final_response = translate_from_english(response_text, user_lang)
-
     return jsonify({"fulfillmentText": final_response})
-
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
