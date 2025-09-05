@@ -381,70 +381,22 @@
 # if __name__ == '__main__':
 #     app.run(debug=True)
 
-
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
 import os
-import openai
+import json
 
 app = Flask(__name__)
 
-# ✅ Load OpenAI API key from environment
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# ----------------- Gemini API Key -----------------
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Store your API key in environment variable
 
-# -------- Translation cache --------
+# ----------------- Translation cache -----------------
 translation_cache = {}  # {original_text: (english_text, detected_lang)}
 reverse_translation_cache = {}  # {english_text: {target_lang: translated_text}}
 
-# -------- Translation functions with caching --------
-def translate_to_english(text):
-    if text in translation_cache:
-        return translation_cache[text]
-
-    try:
-        prompt = f"Detect the language of the text and translate it to English. Respond in JSON with 'text' and 'lang'.\nText: {text}"
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        import json
-        content = response.choices[0].message.content
-        data = json.loads(content)
-        english_text = data.get("text", text)
-        lang = data.get("lang", "en")
-        translation_cache[text] = (english_text, lang)
-        return english_text, lang
-    except Exception as e:
-        print(f"Translation to English failed: {e}")
-        return text, "en"
-
-def translate_from_english(text, target_lang):
-    if target_lang == "en":
-        return text
-    # Check cache
-    if text in reverse_translation_cache and target_lang in reverse_translation_cache[text]:
-        return reverse_translation_cache[text][target_lang]
-
-    try:
-        prompt = f"Translate the following text from English to {target_lang}:\n{text}"
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        translated_text = response.choices[0].message.content.strip()
-        # Save in cache
-        if text not in reverse_translation_cache:
-            reverse_translation_cache[text] = {}
-        reverse_translation_cache[text][target_lang] = translated_text
-        return translated_text
-    except Exception as e:
-        print(f"Translation from English failed: {e}")
-        return text
-
-# -------- Disease Data Mapping --------
+# ----------------- Disease URLs -----------------
 DISEASE_OVERVIEWS = {
     "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
     "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
@@ -453,28 +405,79 @@ DISEASE_OVERVIEWS = {
     "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
 }
 
-# -------- Fetch helpers --------
+# ----------------- Helper Functions -----------------
 def fetch_overview(url):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and "overview" in tag.get_text(strip=True).lower())
+        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "overview" in tag.get_text(strip=True).lower())
         if not heading:
             return None
         paragraphs = []
         for sibling in heading.find_next_siblings():
-            if sibling.name in ["h2","h3"]:
+            if sibling.name in ["h2", "h3"]:
                 break
             if sibling.name == "p":
                 paragraphs.append(sibling.get_text(strip=True))
         return " ".join(paragraphs) if paragraphs else None
-    except:
+    except Exception as e:
+        print(f"Fetch overview error: {e}")
         return None
 
-# (You can include fetch_symptoms, fetch_treatment, fetch_prevention as before)
+# ----------------- Gemini LLM REST Call -----------------
+def gemini_api(prompt):
+    """Call Gemini LLM via REST API with API key (like OpenAI API)."""
+    url = "https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateText"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GEMINI_API_KEY}"
+    }
+    payload = {
+        "prompt": {"text": prompt},
+        "temperature": 0.0,
+        "maxOutputTokens": 512
+    }
+    response = requests.post(url, headers=headers, json=payload, timeout=30)
+    response.raise_for_status()
+    result = response.json()
+    return result["candidates"][0]["content"]
 
-# -------- Webhook --------
+# ----------------- Translation Functions -----------------
+def translate_to_english(text):
+    if text in translation_cache:
+        return translation_cache[text]
+
+    try:
+        prompt = f"Detect language and translate to English. Respond in JSON with keys 'text' and 'lang'.\nText: {text}"
+        content = gemini_api(prompt)
+        data = json.loads(content)
+        english_text = data.get("text", text)
+        lang = data.get("lang", "en")
+        translation_cache[text] = (english_text, lang)
+        return english_text, lang
+    except Exception as e:
+        print(f"Translate to English failed: {e}")
+        return text, "en"
+
+def translate_from_english(text, target_lang):
+    if target_lang == "en":
+        return text
+    if text in reverse_translation_cache and target_lang in reverse_translation_cache[text]:
+        return reverse_translation_cache[text][target_lang]
+
+    try:
+        prompt = f"Translate this English text to {target_lang}:\n{text}"
+        translated_text = gemini_api(prompt).strip()
+        if text not in reverse_translation_cache:
+            reverse_translation_cache[text] = {}
+        reverse_translation_cache[text][target_lang] = translated_text
+        return translated_text
+    except Exception as e:
+        print(f"Translate from English failed: {e}")
+        return text
+
+# ----------------- Webhook Endpoint -----------------
 @app.route('/webhook', methods=['POST'])
 def webhook():
     req = request.get_json()
@@ -492,14 +495,16 @@ def webhook():
         if intent_name == "get_disease_overview":
             overview = fetch_overview(url)
             response_text = overview or f"Overview not found for {disease_param}."
-        # Add other intents here...
+        # Additional intents like get_symptoms, get_treatment, get_prevention can be added here
 
     # Translate response back to user language
     final_response = translate_from_english(response_text, user_lang)
     return jsonify({"fulfillmentText": final_response})
 
+# ----------------- Run App -----------------
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
