@@ -525,55 +525,51 @@ app = Flask(__name__)
 # -------------------
 # Devnagri API Key
 # -------------------
-DEVNAGRI_API_KEY = os.getenv("DEVNAGRI_API_KEY")  # store key in env var for security
-DEVNAGRI_API_URL = "https://app.devnagri.com/api/order/json-response"
+DEVNAGRI_API_KEY = os.getenv("DEVNAGRI_API_KEY")  # store your API key in environment variable
+DEVNAGRI_API_URL = "https://api.devnagri.com/machine-translation/v2/translate"
 
 # -------------------
 # Translation Functions
 # -------------------
-def translate_to_english(text):
+def translate_text_devnagri(text, src_lang="auto", dest_lang="en"):
     """
-    Translate user text to English using Devnagri API.
-    Returns: (translated_text, detected_lang)
+    Translate text using Devnagri API.
     """
     try:
-        payload = {
-            "api_key": DEVNAGRI_API_KEY,
-            "source_text": text,
-            "source_language": "auto",  # auto-detect
-            "target_language": "en"
+        data = {
+            "key": DEVNAGRI_API_KEY,
+            "sentence": text,
+            "src_lang": src_lang,
+            "dest_lang": dest_lang,
+            "industry": "5",
+            "is_apply_glossary": "1"
         }
-        response = requests.post(DEVNAGRI_API_URL, json=payload, timeout=10)
+        response = requests.post(DEVNAGRI_API_URL, data=data, timeout=10)
         response.raise_for_status()
-        data = response.json()
-        translated_text = data.get("translated_text", text)
-        detected_lang = data.get("source_language", "en")
-        return translated_text, detected_lang
+        return response.json().get("translated_sentence", text)
     except Exception as e:
-        print(f"Translate to English failed: {e}")
-        return text, "en"
+        print(f"Translation failed: {e}")
+        return text
 
+def translate_to_english(text):
+    """
+    Translate any language text to English and detect original language.
+    """
+    try:
+        translated = translate_text_devnagri(text, src_lang="auto", dest_lang="en")
+        # Note: Devnagri API does not always return detected language, default to "auto"
+        detected_lang = "auto"
+        return translated, detected_lang
+    except:
+        return text, "en"
 
 def translate_from_english(text, target_lang):
     """
-    Translate English text back to user's language using Devnagri API.
+    Translate English text to user language.
     """
-    if target_lang == "en":
+    if target_lang in ["en", "auto"]:
         return text
-    try:
-        payload = {
-            "api_key": DEVNAGRI_API_KEY,
-            "source_text": text,
-            "source_language": "en",
-            "target_language": target_lang
-        }
-        response = requests.post(DEVNAGRI_API_URL, json=payload, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("translated_text", text)
-    except Exception as e:
-        print(f"Translate from English failed: {e}")
-        return text
+    return translate_text_devnagri(text, src_lang="en", dest_lang=target_lang)
 
 # -------------------
 # Disease Data Mapping
@@ -683,4 +679,3 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
