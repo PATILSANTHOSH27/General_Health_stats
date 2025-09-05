@@ -391,7 +391,7 @@ from sarvamai import SarvamAI
 app = Flask(__name__)
 
 # -------- Initialize Sarvam client --------
-SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
+SARVAM_API_KEY = os.getenv("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")
 sarvam_client = SarvamAI(api_subscription_key=SARVAM_API_KEY)
 
 def translate_text(text, source_lang="auto", target_lang="en-IN"):
