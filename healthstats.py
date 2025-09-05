@@ -519,6 +519,7 @@ import requests
 from bs4 import BeautifulSoup
 import os
 from langdetect import detect, DetectorFactory
+import time
 
 # Ensure consistent language detection
 DetectorFactory.seed = 0
@@ -547,21 +548,18 @@ LANGDETECT_TO_DEVNAGRI = {
 }
 
 # -------------------
-# Translation Function (to English only)
+# Translation Function (to English only) with retries and logging
 # -------------------
 def translate_to_english(disease_param):
-    """
-    Translate disease name to English using Devnagri API.
-    Detects source language automatically and maps to Devnagri codes.
-    """
     if not disease_param.strip():
         return disease_param
 
     try:
         detected_lang = detect(disease_param)
         src_lang = LANGDETECT_TO_DEVNAGRI.get(detected_lang, "hi")  # default Hindi
+        print(f"[DEBUG] Detected language: {detected_lang} -> Devnagri src_lang: {src_lang}")
     except Exception as e:
-        print(f"Language detection failed: {e}. Defaulting to 'hi'.")
+        print(f"[DEBUG] Language detection failed: {e}. Defaulting to 'hi'.")
         src_lang = "hi"
 
     data = {
@@ -572,19 +570,33 @@ def translate_to_english(disease_param):
         "industry": "5",
         "is_apply_glossary": "1"
     }
-    try:
-        response = requests.post(DEVNAGRI_API_URL, data=data, timeout=15)
-        if response.status_code >= 500:
-            print(f"Devnagri server error {response.status_code}, returning original text.")
+
+    print(f"[DEBUG] Devnagri request data: {data}")
+
+    for attempt in range(3):
+        try:
+            response = requests.post(DEVNAGRI_API_URL, data=data, timeout=30)
+            print(f"[DEBUG] Devnagri response status: {response.status_code}")
+            if response.status_code >= 500:
+                print(f"[DEBUG] Server error {response.status_code}, attempt {attempt+1}")
+                time.sleep(2)
+                continue
+            if response.status_code == 400:
+                print(f"[DEBUG] Bad request 400, returning original text. Response: {response.text}")
+                return disease_param
+            response.raise_for_status()
+            translated = response.json().get("translated_sentence", disease_param)
+            print(f"[DEBUG] Translated text: {translated}")
+            return translated
+        except requests.exceptions.ReadTimeout:
+            print(f"[DEBUG] Timeout on attempt {attempt+1}, retrying...")
+            time.sleep(2)
+        except Exception as e:
+            print(f"[DEBUG] Translation failed: {e}. Returning original text.")
             return disease_param
-        if response.status_code == 400:
-            print(f"Devnagri bad request 400, returning original text. Response: {response.text}")
-            return disease_param
-        response.raise_for_status()
-        return response.json().get("translated_sentence", disease_param)
-    except Exception as e:
-        print(f"Translation failed: {e}. Returning original text.")
-        return disease_param
+
+    print("[DEBUG] All translation attempts failed. Returning original text.")
+    return disease_param
 
 # -------------------
 # Disease Data Mapping
@@ -619,10 +631,6 @@ def fetch_overview(url):
         return None
 
 def fetch_content(url, disease_param, keyword):
-    """
-    Generic fetcher for symptoms, treatment, prevention.
-    Tries <ul> first, then falls back to <p>.
-    """
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
@@ -658,7 +666,7 @@ def fetch_content(url, disease_param, keyword):
             return f"The {keyword} of {disease_param.capitalize()} are:\n" + "\n".join(points)
         return None
     except Exception as e:
-        print(f"fetch_content error ({keyword}): {e}")
+        print(f"[DEBUG] fetch_content error ({keyword}): {e}")
         return None
 
 # -------------------
@@ -673,12 +681,11 @@ def webhook():
     # Translate disease to English
     disease_en = translate_to_english(disease_param)
 
-    # Lookup dictionary using lowercase
     url = DISEASE_OVERVIEWS.get(disease_en.lower())
     response_text = "Sorry, I don't understand your request."
 
     if not url:
-        response_text = f"Disease '{disease_param}' not found in database."
+        response_text = f"Disease '{disease_en}' not found in database."
     else:
         if intent_name == "get_disease_overview":
             overview = fetch_overview(url)
@@ -694,5 +701,3 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-
