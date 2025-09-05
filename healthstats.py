@@ -415,7 +415,7 @@ DISEASE_OVERVIEWS = {
 }
 
 # ================= TRANSLATION HELPERS =================
-SYSTRAN_API_KEY = os.environ.get("SYSTRAN_API_KEY")
+SYSTRAN_API_KEY = os.environ.get("9ef9198d-931d-427b-89a9-334910930712")
 SYSTRAN_URL = "https://api-translate.systran.net/translation/text/translate"
 
 def systran_translate_text(text, source_lang, target_lang):
