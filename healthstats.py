@@ -514,7 +514,6 @@
 # if __name__ == '__main__':
 #     app.run(debug=True)
 
-
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
@@ -533,27 +532,42 @@ DEVNAGRI_API_KEY = os.getenv("DEVNAGRI_API_KEY")
 DEVNAGRI_API_URL = "https://api.devnagri.com/machine-translation/v2/translate"
 
 # -------------------
+# LangDetect to Devnagri mapping
+# -------------------
+LANGDETECT_TO_DEVNAGRI = {
+    "te": "te",   # Telugu
+    "hi": "hi",   # Hindi
+    "en": "en",   # English
+    "mr": "mr",   # Marathi
+    "ta": "ta",   # Tamil
+    "kn": "kn",   # Kannada
+    "ml": "ml",   # Malayalam
+    "bn": "bn",   # Bengali
+    "gu": "gu",   # Gujarati
+}
+
+# -------------------
 # Translation Function (to English only)
 # -------------------
 def translate_to_english(disease_param):
     """
     Translate disease name to English using Devnagri API.
-    Detects source language automatically to avoid 400 error.
+    Detects source language automatically and maps to Devnagri codes.
     """
     if not disease_param.strip():
         return disease_param
 
     try:
-        # Detect language using langdetect
-        src_lang = detect(disease_param)
+        detected_lang = detect(disease_param)
+        src_lang = LANGDETECT_TO_DEVNAGRI.get(detected_lang, "hi")  # default Hindi
     except Exception as e:
         print(f"Language detection failed: {e}. Defaulting to 'hi'.")
-        src_lang = "hi"  # default to Hindi if detection fails
+        src_lang = "hi"
 
     data = {
         "key": DEVNAGRI_API_KEY,
         "sentence": disease_param,
-        "src_lang": src_lang,  # must be a valid ISO code
+        "src_lang": src_lang,
         "dest_lang": "en",
         "industry": "5",
         "is_apply_glossary": "1"
@@ -680,4 +694,5 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
