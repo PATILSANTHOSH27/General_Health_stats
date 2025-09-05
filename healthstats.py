@@ -386,7 +386,7 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import json
-from google.cloud import aiplatform_v1beta2 as aiplatform
+from google.cloud import aiplatform
 
 app = Flask(__name__)
 
@@ -396,7 +396,9 @@ PROJECT_ID = "hma-ohfi"  # replace with your Google Cloud project ID
 LOCATION = "us-central1"
 MODEL_ID = "text-bison-001"
 
-client = aiplatform.PredictionServiceClient()
+client = aiplatform.gapic.PredictionServiceClient()
+
+# client = aiplatform.PredictionServiceClient()
 MODEL_NAME = f"projects/{PROJECT_ID}/locations/{LOCATION}/models/{MODEL_ID}"
 
 # ----------------- Translation Cache -----------------
