@@ -519,6 +519,10 @@ from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
 import os
+from langdetect import detect, DetectorFactory
+
+# Ensure consistent language detection
+DetectorFactory.seed = 0
 
 app = Flask(__name__)
 
@@ -533,32 +537,35 @@ DEVNAGRI_API_URL = "https://api.devnagri.com/machine-translation/v2/translate"
 # -------------------
 def translate_to_english(disease_param):
     """
-    Translate the disease name to English using Devnagri API.
-    Returns the original text if API fails.
+    Translate disease name to English using Devnagri API.
+    Detects source language automatically to avoid 400 error.
     """
     if not disease_param.strip():
         return disease_param
+
+    try:
+        # Detect language using langdetect
+        src_lang = detect(disease_param)
+    except Exception as e:
+        print(f"Language detection failed: {e}. Defaulting to 'hi'.")
+        src_lang = "hi"  # default to Hindi if detection fails
+
     data = {
         "key": DEVNAGRI_API_KEY,
         "sentence": disease_param,
-        "src_lang": "auto",
+        "src_lang": src_lang,  # must be a valid ISO code
         "dest_lang": "en",
         "industry": "5",
         "is_apply_glossary": "1"
     }
     try:
         response = requests.post(DEVNAGRI_API_URL, data=data, timeout=15)
-
-        # Handle server errors gracefully
         if response.status_code >= 500:
             print(f"Devnagri server error {response.status_code}, returning original text.")
             return disease_param
-
-        # Handle bad request (400)
         if response.status_code == 400:
             print(f"Devnagri bad request 400, returning original text. Response: {response.text}")
             return disease_param
-
         response.raise_for_status()
         return response.json().get("translated_sentence", disease_param)
     except Exception as e:
@@ -649,15 +656,15 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # Translate disease to English (send original multilingual text to Devnagri)
+    # Translate disease to English
     disease_en = translate_to_english(disease_param)
 
-    # Use lowercase only for dictionary lookup
+    # Lookup dictionary using lowercase
     url = DISEASE_OVERVIEWS.get(disease_en.lower())
     response_text = "Sorry, I don't understand your request."
 
     if not url:
-        response_text = f"Disease '{disease_en}' not found in database."
+        response_text = f"Disease '{disease_param}' not found in database."
     else:
         if intent_name == "get_disease_overview":
             overview = fetch_overview(url)
@@ -669,7 +676,6 @@ def webhook():
         elif intent_name == "get_prevention":
             response_text = fetch_content(url, disease_en, "prevention") or f"Prevention not found for {disease_param}."
 
-    # Return response as-is, no translation back
     return jsonify({"fulfillmentText": response_text})
 
 if __name__ == '__main__':
