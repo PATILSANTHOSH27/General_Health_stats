@@ -386,13 +386,20 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import json
+from google.cloud import aiplatform_v1beta2 as aiplatform
 
 app = Flask(__name__)
 
-# ----------------- Gemini API Key -----------------
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Store your API key in environment variable
+# ----------------- Service Account / Gemini Setup -----------------
+# Make sure you set GOOGLE_APPLICATION_CREDENTIALS environment variable
+PROJECT_ID = "hma-ohfi"  # replace with your Google Cloud project ID
+LOCATION = "us-central1"
+MODEL_ID = "text-bison-001"
 
-# ----------------- Translation cache -----------------
+client = aiplatform.PredictionServiceClient()
+MODEL_NAME = f"projects/{PROJECT_ID}/locations/{LOCATION}/models/{MODEL_ID}"
+
+# ----------------- Translation Cache -----------------
 translation_cache = {}  # {original_text: (english_text, detected_lang)}
 reverse_translation_cache = {}  # {english_text: {target_lang: translated_text}}
 
@@ -405,7 +412,7 @@ DISEASE_OVERVIEWS = {
     "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
 }
 
-# ----------------- Helper Functions -----------------
+# ----------------- Fetch Overview -----------------
 def fetch_overview(url):
     try:
         r = requests.get(url, timeout=10)
@@ -425,33 +432,26 @@ def fetch_overview(url):
         print(f"Fetch overview error: {e}")
         return None
 
-# ----------------- Gemini LLM REST Call -----------------
+# ----------------- Gemini LLM Call -----------------
 def gemini_api(prompt):
-    """
-    Call Gemini LLM via REST API with API key in query parameters.
-    """
-    url = "https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateText"
-    params = {"key": GEMINI_API_KEY}  # API key here
-    headers = {
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "prompt": {"text": prompt},
-        "temperature": 0.0,
-        "maxOutputTokens": 512
-    }
-    response = requests.post(url, headers=headers, params=params, json=payload, timeout=30)
-    response.raise_for_status()
-    result = response.json()
-    return result["candidates"][0]["content"]
+    try:
+        request = aiplatform.PredictRequest(
+            model=MODEL_NAME,
+            instances=[{"content": prompt}],
+            parameters={"temperature": 0.0, "maxOutputTokens": 512},
+        )
+        response = client.predict(request=request)
+        return response.predictions[0]["content"]
+    except Exception as e:
+        print(f"Gemini API call failed: {e}")
+        return prompt  # fallback
 
 # ----------------- Translation Functions -----------------
 def translate_to_english(text):
     if text in translation_cache:
         return translation_cache[text]
-
     try:
-        prompt = f"Detect language and translate to English. Respond in JSON with keys 'text' and 'lang'.\nText: {text}"
+        prompt = f"Detect the language of this text and translate it to English. Respond in JSON with keys 'text' and 'lang'.\nText: {text}"
         content = gemini_api(prompt)
         data = json.loads(content)
         english_text = data.get("text", text)
@@ -467,7 +467,6 @@ def translate_from_english(text, target_lang):
         return text
     if text in reverse_translation_cache and target_lang in reverse_translation_cache[text]:
         return reverse_translation_cache[text][target_lang]
-
     try:
         prompt = f"Translate this English text to {target_lang}:\n{text}"
         translated_text = gemini_api(prompt).strip()
@@ -497,12 +496,12 @@ def webhook():
         if intent_name == "get_disease_overview":
             overview = fetch_overview(url)
             response_text = overview or f"Overview not found for {disease_param}."
-        # You can add more intents like get_symptoms, get_treatment, get_prevention here
+        # You can add more intents here (symptoms, treatment, prevention)
 
     # Translate response back to user language
     final_response = translate_from_english(response_text, user_lang)
     return jsonify({"fulfillmentText": final_response})
 
-# ----------------- Run App -----------------
+# ----------------- Run Flask -----------------
 if __name__ == '__main__':
     app.run(debug=True)
