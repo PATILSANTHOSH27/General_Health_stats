@@ -2,7 +2,7 @@ lxml==5.3.0
 Flask
 gunicorn==23.0.0
 requests==2.32.3
-beautifulsoup4==4.12.3
 langdetect==1.0.9
-beautifulsoup4
-openai==1.32.0
+beautifulsoup4==4.12.2
+openai==1.35.0
+
