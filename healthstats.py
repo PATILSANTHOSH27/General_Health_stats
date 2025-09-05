@@ -548,7 +548,7 @@ LANGDETECT_TO_DEVNAGRI = {
 }
 
 # -------------------
-# Translation Function (to English only) with retries and logging
+# Translation Function (to English only) with retries, logging, and full JSON output
 # -------------------
 def translate_to_english(disease_param):
     if not disease_param.strip():
@@ -577,6 +577,15 @@ def translate_to_english(disease_param):
         try:
             response = requests.post(DEVNAGRI_API_URL, data=data, timeout=30)
             print(f"[DEBUG] Devnagri response status: {response.status_code}")
+            
+            # Print the full JSON response for debugging
+            try:
+                full_json = response.json()
+                print(f"[DEBUG] Full Devnagri response: {full_json}")
+            except Exception as e:
+                print(f"[DEBUG] Failed to parse JSON: {e}")
+                full_json = {}
+
             if response.status_code >= 500:
                 print(f"[DEBUG] Server error {response.status_code}, attempt {attempt+1}")
                 time.sleep(2)
@@ -584,10 +593,12 @@ def translate_to_english(disease_param):
             if response.status_code == 400:
                 print(f"[DEBUG] Bad request 400, returning original text. Response: {response.text}")
                 return disease_param
+
             response.raise_for_status()
-            translated = response.json().get("translated_sentence", disease_param)
+            translated = full_json.get("translated_sentence", disease_param)
             print(f"[DEBUG] Translated text: {translated}")
             return translated
+
         except requests.exceptions.ReadTimeout:
             print(f"[DEBUG] Timeout on attempt {attempt+1}, retrying...")
             time.sleep(2)
@@ -701,3 +712,4 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
