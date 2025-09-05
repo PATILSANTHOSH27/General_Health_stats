@@ -389,41 +389,33 @@ import os
 
 app = Flask(__name__)
 
-# ✅ Load Sarvam API key from Render environment variable
+# ✅ Load Sarvam API key from environment variable
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
-
-# Sarvam Translation API endpoint
 SARVAM_TRANSLATE_URL = "https://api.sarvam.ai/translate"
 
 # -------- Translation Helpers --------
 def detect_and_translate_to_english(text):
-    """
-    Detects input language and translates to English if needed.
-    Returns (translated_text, source_lang).
-    """
+    """Detects input language and translates to English if needed."""
     headers = {
         "Authorization": f"Bearer {SARVAM_API_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "text": text,
-        "target_language": "en"
-    }
+    payload = {"text": text, "target_language": "en"}
 
     try:
         response = requests.post(SARVAM_TRANSLATE_URL, json=payload, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
-        return data.get("translated_text", text), data.get("detected_source_language", "en")
+        translated_text = data.get("translated_text", text)
+        detected_lang = data.get("detected_source_language", "en")
+        return translated_text, detected_lang
     except Exception as e:
-        print(f"Translation to English failed: {e}")
-        return text, "en"
+        print(f"[❌] Translation to English failed: {e}")
+        return text, "en"  # fallback
 
 
 def translate_from_english(text, target_lang):
-    """
-    Translates English response back to user’s original language.
-    """
+    """Translates English response back to user’s original language."""
     if target_lang == "en":
         return text
 
@@ -431,10 +423,7 @@ def translate_from_english(text, target_lang):
         "Authorization": f"Bearer {SARVAM_API_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "text": text,
-        "target_language": target_lang
-    }
+    payload = {"text": text, "target_language": target_lang}
 
     try:
         response = requests.post(SARVAM_TRANSLATE_URL, json=payload, headers=headers, timeout=10)
@@ -442,8 +431,8 @@ def translate_from_english(text, target_lang):
         data = response.json()
         return data.get("translated_text", text)
     except Exception as e:
-        print(f"Translation from English failed: {e}")
-        return text
+        print(f"[❌] Translation from English failed: {e}")
+        return text  # fallback
 
 
 # -------- Static mapping of diseases to WHO fact sheet URLs --------
@@ -470,94 +459,19 @@ DISEASE_OVERVIEWS = {
     "lyme disease": "https://www.who.int/news-room/fact-sheets/detail/lyme-disease",
 }
 
-# -------- Helper function to fetch Overview section --------
-def fetch_overview(url):
+
+# -------- Scraping Helpers --------
+def fetch_section(url, keyword, prefix=None, disease=None):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
-        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "overview" in tag.get_text(strip=True).lower())
+        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and keyword in tag.get_text(strip=True).lower())
         if not heading:
             return None
 
-        paragraphs = []
-        for sibling in heading.find_next_siblings():
-            if sibling.name in ["h2", "h3"]:
-                break
-            if sibling.name == "p":
-                text = sibling.get_text(strip=True)
-                if text:
-                    paragraphs.append(text)
-
-        return " ".join(paragraphs) if paragraphs else None
-    except Exception:
-        return None
-
-# -------- Helper functions for Symptoms, Treatment, Prevention --------
-def fetch_symptoms(url, disease):
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        heading = soup.find(
-            lambda tag: tag.name in ["h2", "h3"] and ("symptoms" in tag.get_text(strip=True).lower())
-        )
-        if not heading:
-            return None
-
-        points = []
-        for sibling in heading.find_next_siblings():
-            if sibling.name in ["h2", "h3"]:
-                break
-            if sibling.name == "ul":
-                for li in sibling.find_all("li"):
-                    text = li.get_text(strip=True)
-                    if text:
-                        points.append(f"- {text}")
-
-        return f"The common symptoms of {disease.capitalize()} are:\n" + "\n".join(points) if points else None
-    except Exception:
-        return None
-
-
-def fetch_treatment(url, disease):
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "treatment" in tag.get_text(strip=True).lower())
-        if not heading:
-            return None
-
-        points = []
-        for sibling in heading.find_next_siblings():
-            if sibling.name in ["h2", "h3"]:
-                break
-            if sibling.name == "ul":
-                for li in sibling.find_all("li"):
-                    text = li.get_text(strip=True)
-                    if text:
-                        points.append(f"- {text}")
-
-        return f"The common treatments for {disease.capitalize()} are:\n" + "\n".join(points) if points else None
-    except Exception:
-        return None
-
-
-def fetch_prevention(url, disease):
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "prevention" in tag.get_text(strip=True).lower())
-        if not heading:
-            return None
-
-        points = []
+        points, paragraphs = [], []
         for sibling in heading.find_next_siblings():
             if sibling.name in ["h2", "h3"]:
                 break
@@ -566,9 +480,18 @@ def fetch_prevention(url, disease):
                     li_text = li.get_text(strip=True)
                     if li_text:
                         points.append(f"- {li_text}")
+            elif sibling.name == "p":
+                text = sibling.get_text(strip=True)
+                if text:
+                    paragraphs.append(text)
 
-        return f"The common prevention methods for {disease.capitalize()} are:\n" + "\n".join(points) if points else None
-    except Exception:
+        if points:
+            return f"{prefix} {disease.capitalize()} are:\n" + "\n".join(points)
+        elif paragraphs:
+            return " ".join(paragraphs)
+        return None
+    except Exception as e:
+        print(f"[❌] Fetch failed: {e}")
         return None
 
 
@@ -579,43 +502,32 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     query_text = req["queryResult"].get("queryText", "")
 
-    # 🌍 Step 1: Detect & Translate user query to English
-    translated_text, user_lang = detect_and_translate_to_english(query_text)
+    # 🌍 Step 1: Translate incoming query to English
+    translated_query, user_lang = detect_and_translate_to_english(query_text)
 
     disease = req["queryResult"].get("parameters", {}).get("disease", "").lower()
     response_text = "Sorry, I don't understand your request."
 
-    if intent_name == "get_disease_overview":
-        url = DISEASE_OVERVIEWS.get(disease)
-        if url:
-            overview = fetch_overview(url)
-            response_text = overview if overview else f"Overview not found for {disease.capitalize()}."
-        else:
-            response_text = f"Disease not found. Please check the name."
+    if disease in DISEASE_OVERVIEWS:
+        url = DISEASE_OVERVIEWS[disease]
 
-    elif intent_name == "get_symptoms":
-        url = DISEASE_OVERVIEWS.get(disease)
-        if url:
-            symptoms = fetch_symptoms(url, disease)
-            response_text = symptoms if symptoms else f"Symptoms not found for {disease.capitalize()}."
-        else:
-            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+        if intent_name == "get_disease_overview":
+            response_text = fetch_section(url, "overview") or f"Overview not found for {disease.capitalize()}."
 
-    elif intent_name == "get_treatment":
-        url = DISEASE_OVERVIEWS.get(disease)
-        if url:
-            treatment = fetch_treatment(url, disease)
-            response_text = treatment if treatment else f"Treatment details not found for {disease.capitalize()}."
-        else:
-            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+        elif intent_name == "get_symptoms":
+            response_text = fetch_section(url, "symptoms", "The common symptoms of", disease) \
+                            or f"Symptoms not found for {disease.capitalize()}."
 
-    elif intent_name == "get_prevention":
-        url = DISEASE_OVERVIEWS.get(disease)
-        if url:
-            prevention = fetch_prevention(url, disease)
-            response_text = prevention if prevention else f"Prevention details not found for {disease.capitalize()}."
-        else:
-            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
+        elif intent_name == "get_treatment":
+            response_text = fetch_section(url, "treatment", "The common treatments for", disease) \
+                            or f"Treatment not found for {disease.capitalize()}."
+
+        elif intent_name == "get_prevention":
+            response_text = fetch_section(url, "prevention", "The common prevention methods for", disease) \
+                            or f"Prevention not found for {disease.capitalize()}."
+
+    else:
+        response_text = f"Sorry, I don't have information about {disease.capitalize()}."
 
     # 🌍 Step 2: Translate response back to user language
     final_response = translate_from_english(response_text, user_lang)
@@ -625,5 +537,6 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
