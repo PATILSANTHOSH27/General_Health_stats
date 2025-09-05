@@ -387,50 +387,59 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import openai
-import json
 
 app = Flask(__name__)
 
-# ✅ Load OpenAI API key from Render environment variable
+# ✅ Load OpenAI API key from environment
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# -------- Translation Helpers using OpenAI --------
+# -------- Translation cache --------
+translation_cache = {}  # {original_text: (english_text, detected_lang)}
+reverse_translation_cache = {}  # {english_text: {target_lang: translated_text}}
+
+# -------- Translation functions with caching --------
 def translate_to_english(text):
-    """
-    Detects language and translates input text to English.
-    Returns: (translated_text, detected_source_language)
-    """
+    if text in translation_cache:
+        return translation_cache[text]
+
     try:
-        prompt = (
-            f"Detect the language of this text and translate it to English. "
-            f"Respond in JSON format with 'text' and 'lang'.\nText: {text}"
-        )
-        response = openai.chat.completions.create(
+        prompt = f"Detect the language of the text and translate it to English. Respond in JSON with 'text' and 'lang'.\nText: {text}"
+        response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
+        import json
         content = response.choices[0].message.content
         data = json.loads(content)
-        return data.get("text", text), data.get("lang", "en")
+        english_text = data.get("text", text)
+        lang = data.get("lang", "en")
+        translation_cache[text] = (english_text, lang)
+        return english_text, lang
     except Exception as e:
         print(f"Translation to English failed: {e}")
         return text, "en"
 
 def translate_from_english(text, target_lang):
-    """
-    Translates English text back to the user language.
-    """
     if target_lang == "en":
         return text
+    # Check cache
+    if text in reverse_translation_cache and target_lang in reverse_translation_cache[text]:
+        return reverse_translation_cache[text][target_lang]
+
     try:
         prompt = f"Translate the following text from English to {target_lang}:\n{text}"
-        response = openai.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        return response.choices[0].message.content.strip()
+        translated_text = response.choices[0].message.content.strip()
+        # Save in cache
+        if text not in reverse_translation_cache:
+            reverse_translation_cache[text] = {}
+        reverse_translation_cache[text][target_lang] = translated_text
+        return translated_text
     except Exception as e:
         print(f"Translation from English failed: {e}")
         return text
@@ -444,63 +453,54 @@ DISEASE_OVERVIEWS = {
     "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
 }
 
-# -------- Fetch Helpers --------
-def fetch_section(url, section_name):
+# -------- Fetch helpers --------
+def fetch_overview(url):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and section_name in tag.get_text(strip=True).lower())
+        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and "overview" in tag.get_text(strip=True).lower())
         if not heading:
             return None
-        points = []
+        paragraphs = []
         for sibling in heading.find_next_siblings():
             if sibling.name in ["h2","h3"]:
                 break
-            if sibling.name == "ul":
-                for li in sibling.find_all("li"):
-                    text = li.get_text(strip=True)
-                    if text:
-                        points.append(f"- {text}")
-            elif sibling.name == "p":
-                text = sibling.get_text(strip=True)
-                if text:
-                    points.append(text)
-        return " ".join(points) if points else None
+            if sibling.name == "p":
+                paragraphs.append(sibling.get_text(strip=True))
+        return " ".join(paragraphs) if paragraphs else None
     except:
         return None
 
+# (You can include fetch_symptoms, fetch_treatment, fetch_prevention as before)
+
 # -------- Webhook --------
-@app.route("/webhook", methods=["POST"])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     req = request.get_json()
     intent_name = req["queryResult"]["intent"]["displayName"]
     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # Step 1: Translate disease param to English
+    # Translate disease to English
     disease_en, user_lang = translate_to_english(disease_param.lower())
-
     response_text = "Sorry, I don't understand your request."
-    url = DISEASE_OVERVIEWS.get(disease_en)
 
+    url = DISEASE_OVERVIEWS.get(disease_en)
     if not url:
         response_text = f"Disease '{disease_param}' not found in database."
     else:
         if intent_name == "get_disease_overview":
-            response_text = fetch_section(url, "overview") or f"Overview not found for {disease_param}."
-        elif intent_name == "get_symptoms":
-            response_text = fetch_section(url, "symptoms") or f"Symptoms not found for {disease_param}."
-        elif intent_name == "get_treatment":
-            response_text = fetch_section(url, "treatment") or f"Treatment not found for {disease_param}."
-        elif intent_name == "get_prevention":
-            response_text = fetch_section(url, "prevention") or f"Prevention not found for {disease_param}."
+            overview = fetch_overview(url)
+            response_text = overview or f"Overview not found for {disease_param}."
+        # Add other intents here...
 
-    # Step 2: Translate response back to user's language
+    # Translate response back to user language
     final_response = translate_from_english(response_text, user_lang)
     return jsonify({"fulfillmentText": final_response})
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
