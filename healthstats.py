@@ -394,7 +394,7 @@ app = Flask(__name__)
 
 
 SARVAM_API_URL = "https://api.sarvam.ai/translate"
-SARVAM_API_KEY = os.getenv("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")  # will load from Render env var
+SARVAM_API_KEY = os.getenv("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")  # will load from Render env var
 
 def detect_language(text):
     try:
