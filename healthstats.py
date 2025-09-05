@@ -385,10 +385,29 @@
 from flask import Flask, request, jsonify
 import requests
 from bs4 import BeautifulSoup
-from langdetect import detect
 import os
+from sarvamai import SarvamAI
 
 app = Flask(__name__)
+
+# -------- Initialize Sarvam client --------
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
+sarvam_client = SarvamAI(api_subscription_key=SARVAM_API_KEY)
+
+def translate_text(text, source_lang="auto", target_lang="en-IN"):
+    """Translate text using Sarvam API"""
+    try:
+        response = sarvam_client.text.translate(
+            input=text,
+            source_language_code=source_lang,
+            target_language_code=target_lang,
+            model="sarvam-translate:v1"
+        )
+        return response.get("translated_text", text), response.get("source_language_code", "en-IN")
+    except Exception as e:
+        print("Translation error:", e)
+        return text, "en-IN"
+
 
 # -------- Static mapping of diseases to WHO fact sheet URLs --------
 DISEASE_OVERVIEWS = {
@@ -414,46 +433,17 @@ DISEASE_OVERVIEWS = {
     "lyme disease": "https://www.who.int/news-room/fact-sheets/detail/lyme-disease",
 }
 
-# ================= TRANSLATION HELPERS =================
-def detect_language(text):
-    """Detect the language of the input text using LibreTranslate"""
-    url = "https://libretranslate.com/detect"
-    try:
-        resp = requests.post(url, data={"q": text})
-        if resp.status_code == 200:
-            data = resp.json()
-            return data[0].get("language", "en")
-    except Exception as e:
-        print("Language detection error:", e)
-    return "en"
-
-def translate_text(text, source_lang, target_lang):
-    """Translate text using LibreTranslate"""
-    url = "https://libretranslate.com/translate"
-    payload = {
-        "q": text,
-        "source": source_lang,
-        "target": target_lang,
-        "format": "text"
-    }
-    try:
-        resp = requests.post(url, data=payload)
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("translatedText", text)
-    except Exception as e:
-        print("Translation error:", e)
-    return text
-
-# ================= SCRAPING HELPERS =================
+# -------- Helper function to fetch Overview section --------
 def fetch_overview(url):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
+
         heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "overview" in tag.get_text(strip=True).lower())
         if not heading:
             return None
+
         paragraphs = []
         for sibling in heading.find_next_siblings():
             if sibling.name in ["h2", "h3"]:
@@ -462,18 +452,28 @@ def fetch_overview(url):
                 text = sibling.get_text(strip=True)
                 if text:
                     paragraphs.append(text)
-        return " ".join(paragraphs) if paragraphs else None
+
+        if paragraphs:
+            return " ".join(paragraphs)
+        return None
     except Exception:
         return None
+
 
 def fetch_symptoms(url, disease):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and ("symptoms" in tag.get_text(strip=True).lower()))
+
+        heading = soup.find(
+            lambda tag: tag.name in ["h2", "h3"] 
+            and ("symptoms" in tag.get_text(strip=True).lower() 
+                 or "signs and symptoms" in tag.get_text(strip=True).lower())
+        )
         if not heading:
             return None
+
         points = []
         for sibling in heading.find_next_siblings():
             if sibling.name in ["h2", "h3"]:
@@ -483,18 +483,24 @@ def fetch_symptoms(url, disease):
                     text = li.get_text(strip=True)
                     if text:
                         points.append(f"- {text}")
-        return f"The common symptoms of {disease.capitalize()} are:\n" + "\n".join(points) if points else None
+
+        if points:
+            return f"The common symptoms of {disease.capitalize()} are:\n" + "\n".join(points)
+        return None
     except Exception:
         return None
+
 
 def fetch_treatment(url, disease):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
+
         heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "treatment" in tag.get_text(strip=True).lower())
         if not heading:
             return None
+
         points = []
         for sibling in heading.find_next_siblings():
             if sibling.name in ["h2", "h3"]:
@@ -504,18 +510,24 @@ def fetch_treatment(url, disease):
                     text = li.get_text(strip=True)
                     if text:
                         points.append(f"- {text}")
-        return f"The common treatments for {disease.capitalize()} are:\n" + "\n".join(points) if points else None
+
+        if points:
+            return f"The common treatments for {disease.capitalize()} are:\n" + "\n".join(points)
+        return None
     except Exception:
         return None
+
 
 def fetch_prevention(url, disease):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
+
         heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "prevention" in tag.get_text(strip=True).lower())
         if not heading:
             return None
+
         points = []
         for sibling in heading.find_next_siblings():
             if sibling.name in ["h2", "h3"]:
@@ -525,9 +537,13 @@ def fetch_prevention(url, disease):
                     li_text = li.get_text(strip=True)
                     if li_text:
                         points.append(f"- {li_text}")
-        return f"The common prevention methods for {disease.capitalize()} are:\n" + "\n".join(points) if points else None
+
+        if points:
+            return f"The common prevention methods for {disease.capitalize()} are:\n" + "\n".join(points)
+        return None
     except Exception:
         return None
+
 
 # ---------- WHO Outbreak API ----------
 WHO_API_URL = (
@@ -547,141 +563,95 @@ def get_who_outbreak_data():
         data = response.json()
         if "value" not in data or not data["value"]:
             return None
+
         outbreaks = []
         for item in data["value"][:5]:
             title = item.get("OverrideTitle") or item.get("Title")
             date = item.get("FormattedDate", "Unknown date")
             url = "https://www.who.int" + item.get("ItemDefaultUrl", "")
             outbreaks.append(f"🦠 {title} ({date})\n🔗 {url}")
+
         return outbreaks
     except Exception as e:
         print(f"Error fetching WHO outbreak data: {e}")
         return None
 
-# ================= FLASK WEBHOOK =================
+
+# -------- Flask webhook route --------
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    req = request.get_json(silent=True, force=True)
-    query_text = req.get("queryResult", {}).get("queryText", "")
+    req = request.get_json()
+    query_text = req["queryResult"]["queryText"]
 
-    # Step 1: Detect user language
-    user_lang = detect_language(query_text)
-    print(f"Detected language: {user_lang}")
+    # 1. Detect and translate input to English
+    translated_input, detected_lang = translate_text(query_text, source_lang="auto", target_lang="en-IN")
 
-    # Step 2: Translate query text to English if needed
-    query_in_english = query_text
-    if user_lang != "en":
-        query_in_english = translate_text(query_text, user_lang, "en")
-
-    # Step 3: Extract intent + parameters
     intent_name = req["queryResult"]["intent"]["displayName"]
     params = req["queryResult"].get("parameters", {})
     disease = params.get("disease", "").lower()
 
-    # Step 3.1: If disease is not English, translate it
-    if disease and user_lang != "en":
-        disease_translated = translate_text(disease, user_lang, "en").lower()
-        print(f"Translated disease: {disease} → {disease_translated}")
-        disease = disease_translated
-
     response_text = "Sorry, I don't understand your request."
 
-    # --------- Disease Overview ---------
     if intent_name == "get_disease_overview":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
             overview = fetch_overview(url)
-            response_text = overview or f"Overview not found for {disease.capitalize()}.\nRead more: {url}"
+            if overview:
+                response_text = overview
+            else:
+                response_text = f"Overview not found for {disease.capitalize()}. You can read more here: {url}"
+        else:
+            response_text = f"Disease not found. Make sure to use a valid disease name."
 
     elif intent_name == "get_symptoms":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
-            response_text = fetch_symptoms(url, disease) or f"Symptoms not found for {disease.capitalize()}.\nRead more: {url}"
+            symptoms = fetch_symptoms(url, disease)
+            if symptoms:
+                response_text = symptoms
+            else:
+                response_text = f"Symptoms not found for {disease.capitalize()}. You can read more here: {url}"
+        else:
+            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
 
     elif intent_name == "get_treatment":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
-            response_text = fetch_treatment(url, disease) or f"Treatment not found for {disease.capitalize()}.\nRead more: {url}"
+            treatment = fetch_treatment(url, disease)
+            if treatment:
+                response_text = treatment
+            else:
+                response_text = f"Treatment details not found for {disease.capitalize()}. You can read more here: {url}"
+        else:
+            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
 
     elif intent_name == "get_prevention":
         url = DISEASE_OVERVIEWS.get(disease)
         if url:
-            response_text = fetch_prevention(url, disease) or f"Prevention not found for {disease.capitalize()}.\nRead more: {url}"
+            prevention = fetch_prevention(url, disease)
+            if prevention:
+                response_text = prevention
+            else:
+                response_text = f"Prevention methods not found for {disease.capitalize()}. You can read more here: {url}"
+        else:
+            response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
 
     elif intent_name == "disease_outbreak.general":
         outbreaks = get_who_outbreak_data()
-        response_text = "⚠️ Unable to fetch outbreak data." if not outbreaks else "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
+        if not outbreaks:
+            response_text = "⚠️ Unable to fetch outbreak data right now."
+        else:
+            response_text = "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
 
-    # Step 4: Translate response back into user’s language if needed
-    if user_lang != "en":
-        response_text = translate_text(response_text, "en", user_lang)
+    # 2. Translate response back to user language if not English
+    if detected_lang != "en-IN":
+        final_response, _ = translate_text(response_text, source_lang="en-IN", target_lang=detected_lang)
+    else:
+        final_response = response_text
 
-    return jsonify({"fulfillmentText": response_text})
-
-# @app.route('/webhook', methods=['POST'])
-# def webhook():
-#     req = request.get_json()
-#     intent_name = req["queryResult"]["intent"]["displayName"]
-#     params = req["queryResult"].get("parameters", {})
-#     disease = params.get("disease", "").lower()
-#     user_text = req["queryResult"].get("queryText", "")
-
-#     # Detect user language
-#     try:
-#         user_lang = detect(user_text)
-#     except:
-#         user_lang = "en"
-
-#     response_text = "Sorry, I don't understand your request."
-
-#     if intent_name == "get_disease_overview":
-#         url = DISEASE_OVERVIEWS.get(disease)
-#         if url:
-#             overview = fetch_overview(url)
-#             response_text = overview or f"Overview not found for {disease.capitalize()}. You can read more here: {url}"
-#         else:
-#             response_text = f"Disease not found. Make sure to use a valid disease name."
-
-#     elif intent_name == "get_symptoms":
-#         url = DISEASE_OVERVIEWS.get(disease)
-#         if url:
-#             symptoms = fetch_symptoms(url, disease)
-#             response_text = symptoms or f"Symptoms not found for {disease.capitalize()}. You can read more here: {url}"
-#         else:
-#             response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
-
-#     elif intent_name == "get_treatment":
-#         url = DISEASE_OVERVIEWS.get(disease)
-#         if url:
-#             treatment = fetch_treatment(url, disease)
-#             response_text = treatment or f"Treatment details not found for {disease.capitalize()}. You can read more here: {url}"
-#         else:
-#             response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
-
-#     elif intent_name == "get_prevention":
-#         url = DISEASE_OVERVIEWS.get(disease)
-#         if url:
-#             prevention = fetch_prevention(url, disease)
-#             response_text = prevention or f"Prevention methods not found for {disease.capitalize()}. You can read more here: {url}"
-#         else:
-#             response_text = f"Sorry, I don't have a URL for {disease.capitalize()}."
-
-#     elif intent_name == "disease_outbreak.general":
-#         outbreaks = get_who_outbreak_data()
-#         if not outbreaks:
-#             response_text = "⚠️ Unable to fetch outbreak data right now."
-#         else:
-#             response_text = "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
-
-#     # Translate back if needed
-#     if user_lang != "en":
-#         response_text = systran_translate_text(response_text, "en", user_lang)
-
-#     return jsonify({"fulfillmentText": response_text})
+    return jsonify({"fulfillmentText": final_response})
 
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-
 
