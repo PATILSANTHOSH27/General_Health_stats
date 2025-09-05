@@ -415,54 +415,35 @@ DISEASE_OVERVIEWS = {
 }
 
 # ================= TRANSLATION HELPERS =================
-import requests
-import os
-
-SYSTRAN_API_KEY = os.getenv("9ef9198d-931d-427b-89a9-334910930712")  # set in Render env variables
-
 def detect_language(text):
-    """Detect the language of the input text using SYSTRAN API"""
-    url = "https://api-translate.systran.net/translation/detect"
-    headers = {"Authorization": f"Bearer {SYSTRAN_API_KEY}"}
-    payload = {"input": text}
+    """Detect the language of the input text using LibreTranslate"""
+    url = "https://libretranslate.com/detect"
     try:
-        resp = requests.post(url, headers=headers, json=payload)
+        resp = requests.post(url, data={"q": text})
         if resp.status_code == 200:
             data = resp.json()
-            return data.get("detectedLanguages", [{}])[0].get("languageId", "en")
+            return data[0].get("language", "en")
     except Exception as e:
         print("Language detection error:", e)
-    return "en"  # fallback to English
+    return "en"
 
 def translate_text(text, source_lang, target_lang):
-    """Translate text using SYSTRAN API"""
-    url = "https://api-translate.systran.net/translation/text/translate"
-    headers = {"Authorization": f"Bearer {SYSTRAN_API_KEY}"}
-    payload = {"input": text, "source": source_lang, "target": target_lang}
+    """Translate text using LibreTranslate"""
+    url = "https://libretranslate.com/translate"
+    payload = {
+        "q": text,
+        "source": source_lang,
+        "target": target_lang,
+        "format": "text"
+    }
     try:
-        resp = requests.post(url, headers=headers, json=payload)
+        resp = requests.post(url, data=payload)
         if resp.status_code == 200:
             data = resp.json()
-            return data.get("outputs", [{}])[0].get("output", text)
+            return data.get("translatedText", text)
     except Exception as e:
         print("Translation error:", e)
-    return text  # fallback if translation fails
-
-# SYSTRAN_API_KEY = os.environ.get("9ef9198d-931d-427b-89a9-334910930712")
-# SYSTRAN_URL = "https://api-translate.systran.net/translation/text/translate"
-
-# def systran_translate_text(text, source_lang, target_lang):
-#     """Translate text using SYSTRAN API."""
-#     try:
-#         headers = {"Authorization": f"Bearer {SYSTRAN_API_KEY}"}
-#         params = {"source": source_lang, "target": target_lang, "input": text}
-#         r = requests.get(SYSTRAN_URL, headers=headers, params=params, timeout=10)
-#         r.raise_for_status()
-#         data = r.json()
-#         return data["outputs"][0]["output"]
-#     except Exception as e:
-#         print(f"SYSTRAN translation error: {e}")
-#         return text  # fallback to original
+    return text
 
 # ================= SCRAPING HELPERS =================
 def fetch_overview(url):
@@ -699,8 +680,8 @@ def webhook():
 #     return jsonify({"fulfillmentText": response_text})
 
 
-# if __name__ == '__main__':
-#     app.run(debug=True)
+if __name__ == '__main__':
+    app.run(debug=True)
 
 
 
