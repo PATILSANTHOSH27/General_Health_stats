@@ -522,20 +522,21 @@ from langdetect import detect, DetectorFactory
 import time
 import json
 
-# Ensure consistent language detection
+# -------------------
+# Setup
+# -------------------
 DetectorFactory.seed = 0
-
 app = Flask(__name__)
 
 # -------------------
-# OpenRouter API Key
+# OpenRouter API Key & Model
 # -------------------
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_API_URL = "https://api.openrouter.ai/v1/chat/completions"
 OPENROUTER_MODEL = "DeepSeek: R1 0528"
 
 # -------------------
-# LangDetect to Devnagri mapping (keep as is)
+# Supported Indian Languages
 # -------------------
 LANGDETECT_TO_DEVNAGRI = {
     "te": "te",   # Telugu
@@ -550,7 +551,7 @@ LANGDETECT_TO_DEVNAGRI = {
 }
 
 # -------------------
-# Translation Function (to English using DeepSeek R1)
+# Translate Indian language to English using DeepSeek R1
 # -------------------
 def translate_to_english(disease_param):
     if not disease_param.strip():
@@ -559,11 +560,12 @@ def translate_to_english(disease_param):
     try:
         detected_lang = detect(disease_param)
         src_lang = LANGDETECT_TO_DEVNAGRI.get(detected_lang, "hi")  # default Hindi
-        print(f"[DEBUG] Detected language: {detected_lang} -> source language: {src_lang}")
+        print(f"[DEBUG] Detected language: {detected_lang} -> source: {src_lang}")
     except Exception as e:
         print(f"[DEBUG] Language detection failed: {e}. Defaulting to 'hi'.")
         src_lang = "hi"
 
+    # Use the original disease_param in the prompt
     prompt = f"Translate the following text from {src_lang} to English:\n{disease_param}"
 
     headers = {
@@ -574,7 +576,7 @@ def translate_to_english(disease_param):
     payload = {
         "model": OPENROUTER_MODEL,
         "messages": [
-            {"role": "system", "content": "You are a translator."},
+            {"role": "system", "content": "You are a translator for Indian languages to English."},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0
@@ -597,13 +599,11 @@ def translate_to_english(disease_param):
                 time.sleep(2)
                 continue
             if response.status_code == 400:
-                print(f"[DEBUG] Bad request 400, returning original text. Response: {response.text}")
+                print(f"[DEBUG] Bad request 400. Returning original text. Response: {response.text}")
                 return disease_param
 
             response.raise_for_status()
-            # Extract translated text
             translated = full_json.get("choices", [{}])[0].get("message", {}).get("content", disease_param)
-            print(f"[DEBUG] Translated text: {translated}")
             return translated
 
         except requests.exceptions.ReadTimeout:
@@ -617,7 +617,7 @@ def translate_to_english(disease_param):
     return disease_param
 
 # -------------------
-# Disease Data Mapping (same as before)
+# Disease URLs
 # -------------------
 DISEASE_OVERVIEWS = {
     "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
@@ -628,7 +628,7 @@ DISEASE_OVERVIEWS = {
 }
 
 # -------------------
-# Fetch Helpers (same as before)
+# Fetch Helpers
 # -------------------
 def fetch_overview(url):
     try:
@@ -638,65 +638,52 @@ def fetch_overview(url):
         heading = soup.find(lambda tag: tag.name in ["h2","h3"] and "overview" in tag.get_text(strip=True).lower())
         if not heading:
             return None
-        paragraphs = []
-        for sibling in heading.find_next_siblings():
-            if sibling.name in ["h2","h3"]:
-                break
-            if sibling.name == "p":
-                paragraphs.append(sibling.get_text(strip=True))
+        paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name=="p"]
         return " ".join(paragraphs) if paragraphs else None
     except:
         return None
 
-def fetch_content(url, disease_param, keyword):
+def fetch_content(url, disease, keyword):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(
-            lambda tag: tag.name in ["h2","h3"] and keyword in tag.get_text(strip=True).lower()
-        )
+        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and keyword in tag.get_text(strip=True).lower())
         if not heading:
             return None
 
         points = []
-        for sibling in heading.find_next_siblings():
-            if sibling.name in ["h2","h3"]:
+        for sib in heading.find_next_siblings():
+            if sib.name in ["h2","h3"]:
                 break
-            if sibling.name == "ul":
-                for li in sibling.find_all("li"):
-                    text = li.get_text(strip=True)
-                    if text:
-                        points.append(f"- {text}")
+            if sib.name == "ul":
+                points.extend([f"- {li.get_text(strip=True)}" for li in sib.find_all("li") if li.get_text(strip=True)])
 
         if not points:
-            paragraphs = []
-            for sibling in heading.find_next_siblings():
-                if sibling.name in ["h2","h3"]:
-                    break
-                if sibling.name == "p":
-                    text = sibling.get_text(strip=True)
-                    if text:
-                        paragraphs.append(f"- {text}")
-            points = paragraphs
+            points = [f"- {sib.get_text(strip=True)}" for sib in heading.find_next_siblings() if sib.name=="p" and sib.get_text(strip=True)]
 
         if points:
-            return f"The {keyword} of {disease_param.capitalize()} are:\n" + "\n".join(points)
+            return f"The {keyword} of {disease.capitalize()} are:\n" + "\n".join(points)
         return None
     except Exception as e:
         print(f"[DEBUG] fetch_content error ({keyword}): {e}")
         return None
 
 # -------------------
-# Webhook
+# Webhook Route
 # -------------------
-@app.route('/webhook', methods=['POST'])
+@app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
+    if request.method == 'GET':
+        return "Webhook is live", 200
+
     req = request.get_json()
+    print("[DEBUG] Incoming request:", req)
+
     intent_name = req["queryResult"]["intent"]["displayName"]
     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # Translate disease to English
+    # Translate using original disease_param
     disease_en = translate_to_english(disease_param)
 
     url = DISEASE_OVERVIEWS.get(disease_en.lower())
@@ -717,7 +704,11 @@ def webhook():
 
     return jsonify({"fulfillmentText": response_text})
 
+# -------------------
+# Run Server
+# -------------------
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
