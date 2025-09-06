@@ -724,42 +724,44 @@ DetectorFactory.seed = 0
 app = Flask(__name__)
 
 # -------------------
+# LibreTranslate API
+# -------------------
+LIBRETRANSLATE_URL = "https://libretranslate.de/translate"  # free public endpoint
+
+# -------------------
 # Translate Indian language to English using LibreTranslate
 # -------------------
-def translate_to_english(disease_param):
-    if not disease_param.strip():
-        return disease_param
+def translate_to_english(text):
+    if not text.strip():
+        return text
 
     try:
-        detected_lang = detect(disease_param)
-        if detected_lang == "en":
-            return disease_param  # already English
+        detected_lang = detect(text)
+        print(f"[DEBUG] Detected language: {detected_lang}")
     except Exception as e:
-        print(f"[DEBUG] Language detection failed: {e}. Defaulting to 'hi'.")
+        print(f"[DEBUG] Language detection failed: {e}. Defaulting to Hindi.")
         detected_lang = "hi"
 
+    # If already English, skip translation
+    if detected_lang == "en":
+        return text
+
     payload = {
-        "q": disease_param,
+        "q": text,
         "source": detected_lang,
         "target": "en",
         "format": "text"
     }
 
     try:
-        response = requests.post(
-            "https://libretranslate.com/translate",
-            headers={"Content-Type": "application/json"},
-            json=payload,
-            timeout=15
-        )
-        response.raise_for_status()
-        result = response.json()
-        translated = result.get("translatedText", disease_param)
-        print(f"[DEBUG] LibreTranslate translated: {translated}")
+        r = requests.post(LIBRETRANSLATE_URL, data=payload, timeout=10)
+        r.raise_for_status()
+        translated = r.json().get("translatedText", text)
+        print(f"[DEBUG] Translated text: {translated}")
         return translated
     except Exception as e:
-        print(f"[DEBUG] LibreTranslate failed: {e}")
-        return disease_param
+        print(f"[DEBUG] Translation API failed: {e}")
+        return text
 
 # -------------------
 # Disease URLs
@@ -783,9 +785,10 @@ def fetch_overview(url):
         heading = soup.find(lambda tag: tag.name in ["h2","h3"] and "overview" in tag.get_text(strip=True).lower())
         if not heading:
             return None
-        paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name == "p"]
+        paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name=="p"]
         return " ".join(paragraphs) if paragraphs else None
-    except:
+    except Exception as e:
+        print(f"[DEBUG] fetch_overview error: {e}")
         return None
 
 def fetch_content(url, disease, keyword):
@@ -796,7 +799,6 @@ def fetch_content(url, disease, keyword):
         heading = soup.find(lambda tag: tag.name in ["h2","h3"] and keyword in tag.get_text(strip=True).lower())
         if not heading:
             return None
-
         points = []
         for sib in heading.find_next_siblings():
             if sib.name in ["h2","h3"]:
@@ -804,8 +806,7 @@ def fetch_content(url, disease, keyword):
             if sib.name == "ul":
                 points.extend([f"- {li.get_text(strip=True)}" for li in sib.find_all("li") if li.get_text(strip=True)])
         if not points:
-            points = [f"- {sib.get_text(strip=True)}" for sib in heading.find_next_siblings() if sib.name == "p" and sib.get_text(strip=True)]
-
+            points = [f"- {sib.get_text(strip=True)}" for sib in heading.find_next_siblings() if sib.name=="p" and sib.get_text(strip=True)]
         if points:
             return f"The {keyword} of {disease.capitalize()} are:\n" + "\n".join(points)
         return None
@@ -816,16 +817,18 @@ def fetch_content(url, disease, keyword):
 # -------------------
 # Webhook Route
 # -------------------
-@app.route('/webhook', methods=['GET', 'POST'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
-   
+    req = request.get_json()
+    print("[DEBUG] Incoming request:", req)
+
     intent_name = req["queryResult"]["intent"]["displayName"]
     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # Translate input disease to English
-    disease_en = translate_to_english(disease_param)
+    # Translate disease name into English
+    disease_en = translate_to_english(disease_param).lower().strip()
 
-    url = DISEASE_OVERVIEWS.get(disease_en.lower())
+    url = DISEASE_OVERVIEWS.get(disease_en)
     response_text = "Sorry, I don't understand your request."
 
     if not url:
