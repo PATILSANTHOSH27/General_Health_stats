@@ -716,6 +716,7 @@ from bs4 import BeautifulSoup
 import os
 from langdetect import detect, DetectorFactory
 import time
+import json
 
 # -------------------
 # Setup
@@ -724,44 +725,24 @@ DetectorFactory.seed = 0
 app = Flask(__name__)
 
 # -------------------
-# LibreTranslate API
+# LibreTranslate Settings
 # -------------------
-LIBRETRANSLATE_URL = "https://libretranslate.de/translate"  # free public endpoint
+LIBRETRANSLATE_URL = "https://libretranslate.com/translate"
 
 # -------------------
-# Translate Indian language to English using LibreTranslate
+# Supported Indian Languages for langdetect mapping
 # -------------------
-def translate_to_english(text):
-    if not text.strip():
-        return text
-
-    try:
-        detected_lang = detect(text)
-        print(f"[DEBUG] Detected language: {detected_lang}")
-    except Exception as e:
-        print(f"[DEBUG] Language detection failed: {e}. Defaulting to Hindi.")
-        detected_lang = "hi"
-
-    # If already English, skip translation
-    if detected_lang == "en":
-        return text
-
-    payload = {
-        "q": text,
-        "source": detected_lang,
-        "target": "en",
-        "format": "text"
-    }
-
-    try:
-        r = requests.post(LIBRETRANSLATE_URL, data=payload, timeout=10)
-        r.raise_for_status()
-        translated = r.json().get("translatedText", text)
-        print(f"[DEBUG] Translated text: {translated}")
-        return translated
-    except Exception as e:
-        print(f"[DEBUG] Translation API failed: {e}")
-        return text
+LANGDETECT_TO_LIBRE = {
+    "te": "te",  # Telugu
+    "hi": "hi",  # Hindi
+    "en": "en",  # English
+    "mr": "mr",  # Marathi
+    "ta": "ta",  # Tamil
+    "kn": "kn",  # Kannada
+    "ml": "ml",  # Malayalam
+    "bn": "bn",  # Bengali
+    "gu": "gu",  # Gujarati
+}
 
 # -------------------
 # Disease URLs
@@ -773,6 +754,52 @@ DISEASE_OVERVIEWS = {
     "hiv": "https://www.who.int/news-room/fact-sheets/detail/hiv-aids",
     "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
 }
+
+# -------------------
+# Service Account Access Token
+# -------------------
+from google.oauth2 import service_account
+import google.auth.transport.requests
+
+def get_access_token():
+    service_account_info = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
+    credentials = service_account.Credentials.from_service_account_info(
+        service_account_info,
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    request = google.auth.transport.requests.Request()
+    credentials.refresh(request)
+    return credentials.token
+
+# -------------------
+# Translation Function
+# -------------------
+def translate_to_english(disease_param):
+    if not disease_param.strip():
+        return disease_param
+
+    try:
+        detected_lang = detect(disease_param)
+        src_lang = LANGDETECT_TO_LIBRE.get(detected_lang, "hi")  # default Hindi
+    except Exception:
+        src_lang = "hi"
+
+    if src_lang == "en":
+        return disease_param
+
+    try:
+        payload = {
+            "q": disease_param,
+            "source": src_lang,
+            "target": "en",
+            "format": "text"
+        }
+        response = requests.post(LIBRETRANSLATE_URL, data=payload, timeout=20)
+        response.raise_for_status()
+        translated = response.json().get("translatedText", disease_param)
+        return translated
+    except Exception:
+        return disease_param
 
 # -------------------
 # Fetch Helpers
@@ -787,8 +814,7 @@ def fetch_overview(url):
             return None
         paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name=="p"]
         return " ".join(paragraphs) if paragraphs else None
-    except Exception as e:
-        print(f"[DEBUG] fetch_overview error: {e}")
+    except:
         return None
 
 def fetch_content(url, disease, keyword):
@@ -810,8 +836,7 @@ def fetch_content(url, disease, keyword):
         if points:
             return f"The {keyword} of {disease.capitalize()} are:\n" + "\n".join(points)
         return None
-    except Exception as e:
-        print(f"[DEBUG] fetch_content error ({keyword}): {e}")
+    except:
         return None
 
 # -------------------
@@ -820,15 +845,13 @@ def fetch_content(url, disease, keyword):
 @app.route('/webhook', methods=['POST'])
 def webhook():
     req = request.get_json()
-    print("[DEBUG] Incoming request:", req)
-
     intent_name = req["queryResult"]["intent"]["displayName"]
     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # Translate disease name into English
-    disease_en = translate_to_english(disease_param).lower().strip()
+    # Translate any Indian language input to English
+    disease_en = translate_to_english(disease_param)
 
-    url = DISEASE_OVERVIEWS.get(disease_en)
+    url = DISEASE_OVERVIEWS.get(disease_en.lower())
     response_text = "Sorry, I don't understand your request."
 
     if not url:
@@ -851,6 +874,7 @@ def webhook():
 # -------------------
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
