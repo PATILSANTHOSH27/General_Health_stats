@@ -514,201 +514,228 @@
 # if __name__ == '__main__':
 #     app.run(debug=True)
 
+# from flask import Flask, request, jsonify
+# import requests
+# from bs4 import BeautifulSoup
+# import os
+# from langdetect import detect, DetectorFactory
+# import time
+# import json
+
+# # -------------------
+# # Setup
+# # -------------------
+# DetectorFactory.seed = 0
+# app = Flask(__name__)
+
+# # -------------------
+# # OpenRouter API Key & Model
+# # -------------------
+# OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+# OPENROUTER_API_URL = "https://api.openrouter.ai/v1/chat/completions"
+# OPENROUTER_MODEL = "DeepSeek: R1 0528"
+
+# # -------------------
+# # Supported Indian Languages
+# # -------------------
+# LANGDETECT_TO_DEVNAGRI = {
+#     "te": "te",   # Telugu
+#     "hi": "hi",   # Hindi
+#     "en": "en",   # English
+#     "mr": "mr",   # Marathi
+#     "ta": "ta",   # Tamil
+#     "kn": "kn",   # Kannada
+#     "ml": "ml",   # Malayalam
+#     "bn": "bn",   # Bengali
+#     "gu": "gu",   # Gujarati
+# }
+
+# # -------------------
+# # Translate Indian language to English using DeepSeek R1
+# # -------------------
+# def translate_to_english(disease_param):
+#     if not disease_param.strip():
+#         return disease_param
+
+#     try:
+#         detected_lang = detect(disease_param)
+#         src_lang = LANGDETECT_TO_DEVNAGRI.get(detected_lang, "hi")  # default Hindi
+#         print(f"[DEBUG] Detected language: {detected_lang} -> source: {src_lang}")
+#     except Exception as e:
+#         print(f"[DEBUG] Language detection failed: {e}. Defaulting to 'hi'.")
+#         src_lang = "hi"
+
+#     # Use the original disease_param in the prompt
+#     prompt = f"Translate the following text from {src_lang} to English:\n{disease_param}"
+
+#     headers = {
+#         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+#         "Content-Type": "application/json"
+#     }
+
+#     payload = {
+#         "model": OPENROUTER_MODEL,
+#         "messages": [
+#             {"role": "system", "content": "You are a translator for Indian languages to English."},
+#             {"role": "user", "content": prompt}
+#         ],
+#         "temperature": 0
+#     }
+
+#     for attempt in range(3):
+#         try:
+#             response = requests.post(OPENROUTER_API_URL, headers=headers, data=json.dumps(payload), timeout=30)
+#             print(f"[DEBUG] OpenRouter response status: {response.status_code}")
+
+#             try:
+#                 full_json = response.json()
+#                 print(f"[DEBUG] Full OpenRouter response: {full_json}")
+#             except Exception as e:
+#                 print(f"[DEBUG] Failed to parse JSON: {e}")
+#                 full_json = {}
+
+#             if response.status_code >= 500:
+#                 print(f"[DEBUG] Server error {response.status_code}, attempt {attempt+1}")
+#                 time.sleep(2)
+#                 continue
+#             if response.status_code == 400:
+#                 print(f"[DEBUG] Bad request 400. Returning original text. Response: {response.text}")
+#                 return disease_param
+
+#             response.raise_for_status()
+#             translated = full_json.get("choices", [{}])[0].get("message", {}).get("content", disease_param)
+#             return translated
+
+#         except requests.exceptions.ReadTimeout:
+#             print(f"[DEBUG] Timeout on attempt {attempt+1}, retrying...")
+#             time.sleep(2)
+#         except Exception as e:
+#             print(f"[DEBUG] Translation failed: {e}. Returning original text.")
+#             return disease_param
+
+#     print("[DEBUG] All translation attempts failed. Returning original text.")
+#     return disease_param
+
+# # -------------------
+# # Disease URLs
+# # -------------------
+# DISEASE_OVERVIEWS = {
+#     "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
+#     "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
+#     "dengue": "https://www.who.int/news-room/fact-sheets/detail/dengue-and-severe-dengue",
+#     "hiv": "https://www.who.int/news-room/fact-sheets/detail/hiv-aids",
+#     "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
+# }
+
+# # -------------------
+# # Fetch Helpers
+# # -------------------
+# def fetch_overview(url):
+#     try:
+#         r = requests.get(url, timeout=10)
+#         r.raise_for_status()
+#         soup = BeautifulSoup(r.text, "html.parser")
+#         heading = soup.find(lambda tag: tag.name in ["h2","h3"] and "overview" in tag.get_text(strip=True).lower())
+#         if not heading:
+#             return None
+#         paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name=="p"]
+#         return " ".join(paragraphs) if paragraphs else None
+#     except:
+#         return None
+
+# def fetch_content(url, disease, keyword):
+#     try:
+#         r = requests.get(url, timeout=10)
+#         r.raise_for_status()
+#         soup = BeautifulSoup(r.text, "html.parser")
+#         heading = soup.find(lambda tag: tag.name in ["h2","h3"] and keyword in tag.get_text(strip=True).lower())
+#         if not heading:
+#             return None
+
+#         points = []
+#         for sib in heading.find_next_siblings():
+#             if sib.name in ["h2","h3"]:
+#                 break
+#             if sib.name == "ul":
+#                 points.extend([f"- {li.get_text(strip=True)}" for li in sib.find_all("li") if li.get_text(strip=True)])
+
+#         if not points:
+#             points = [f"- {sib.get_text(strip=True)}" for sib in heading.find_next_siblings() if sib.name=="p" and sib.get_text(strip=True)]
+
+#         if points:
+#             return f"The {keyword} of {disease.capitalize()} are:\n" + "\n".join(points)
+#         return None
+#     except Exception as e:
+#         print(f"[DEBUG] fetch_content error ({keyword}): {e}")
+#         return None
+
+# # -------------------
+# # Webhook Route
+# # -------------------
+# @app.route('/webhook', methods=['GET', 'POST'])
+# def webhook():
+#     if request.method == 'GET':
+#         return "Webhook is live", 200
+
+#     req = request.get_json()
+#     print("[DEBUG] Incoming request:", req)
+
+#     intent_name = req["queryResult"]["intent"]["displayName"]
+#     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
+
+#     # Translate using original disease_param
+#     disease_en = translate_to_english(disease_param)
+
+#     url = DISEASE_OVERVIEWS.get(disease_en.lower())
+#     response_text = "Sorry, I don't understand your request."
+
+#     if not url:
+#         response_text = f"Disease '{disease_en}' not found in database."
+#     else:
+#         if intent_name == "get_disease_overview":
+#             overview = fetch_overview(url)
+#             response_text = overview or f"Overview not found for {disease_param}."
+#         elif intent_name == "get_symptoms":
+#             response_text = fetch_content(url, disease_en, "symptoms") or f"Symptoms not found for {disease_param}."
+#         elif intent_name == "get_treatment":
+#             response_text = fetch_content(url, disease_en, "treatment") or f"Treatment not found for {disease_param}."
+#         elif intent_name == "get_prevention":
+#             response_text = fetch_content(url, disease_en, "prevention") or f"Prevention not found for {disease_param}."
+
+#     return jsonify({"fulfillmentText": response_text})
+
+# # -------------------
+# # Run Server
+# # -------------------
+# if __name__ == '__main__':
+#     app.run(debug=True)
+
 from flask import Flask, request, jsonify
-import requests
-from bs4 import BeautifulSoup
-import os
-from langdetect import detect, DetectorFactory
-import time
 import json
 
-# -------------------
-# Setup
-# -------------------
-DetectorFactory.seed = 0
 app = Flask(__name__)
 
-# -------------------
-# OpenRouter API Key & Model
-# -------------------
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_API_URL = "https://api.openrouter.ai/v1/chat/completions"
-OPENROUTER_MODEL = "DeepSeek: R1 0528"
-
-# -------------------
-# Supported Indian Languages
-# -------------------
-LANGDETECT_TO_DEVNAGRI = {
-    "te": "te",   # Telugu
-    "hi": "hi",   # Hindi
-    "en": "en",   # English
-    "mr": "mr",   # Marathi
-    "ta": "ta",   # Tamil
-    "kn": "kn",   # Kannada
-    "ml": "ml",   # Malayalam
-    "bn": "bn",   # Bengali
-    "gu": "gu",   # Gujarati
-}
-
-# -------------------
-# Translate Indian language to English using DeepSeek R1
-# -------------------
-def translate_to_english(disease_param):
-    if not disease_param.strip():
-        return disease_param
-
-    try:
-        detected_lang = detect(disease_param)
-        src_lang = LANGDETECT_TO_DEVNAGRI.get(detected_lang, "hi")  # default Hindi
-        print(f"[DEBUG] Detected language: {detected_lang} -> source: {src_lang}")
-    except Exception as e:
-        print(f"[DEBUG] Language detection failed: {e}. Defaulting to 'hi'.")
-        src_lang = "hi"
-
-    # Use the original disease_param in the prompt
-    prompt = f"Translate the following text from {src_lang} to English:\n{disease_param}"
-
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": "You are a translator for Indian languages to English."},
-            {"role": "user", "content": prompt}
-        ],
-        "temperature": 0
-    }
-
-    for attempt in range(3):
-        try:
-            response = requests.post(OPENROUTER_API_URL, headers=headers, data=json.dumps(payload), timeout=30)
-            print(f"[DEBUG] OpenRouter response status: {response.status_code}")
-
-            try:
-                full_json = response.json()
-                print(f"[DEBUG] Full OpenRouter response: {full_json}")
-            except Exception as e:
-                print(f"[DEBUG] Failed to parse JSON: {e}")
-                full_json = {}
-
-            if response.status_code >= 500:
-                print(f"[DEBUG] Server error {response.status_code}, attempt {attempt+1}")
-                time.sleep(2)
-                continue
-            if response.status_code == 400:
-                print(f"[DEBUG] Bad request 400. Returning original text. Response: {response.text}")
-                return disease_param
-
-            response.raise_for_status()
-            translated = full_json.get("choices", [{}])[0].get("message", {}).get("content", disease_param)
-            return translated
-
-        except requests.exceptions.ReadTimeout:
-            print(f"[DEBUG] Timeout on attempt {attempt+1}, retrying...")
-            time.sleep(2)
-        except Exception as e:
-            print(f"[DEBUG] Translation failed: {e}. Returning original text.")
-            return disease_param
-
-    print("[DEBUG] All translation attempts failed. Returning original text.")
-    return disease_param
-
-# -------------------
-# Disease URLs
-# -------------------
-DISEASE_OVERVIEWS = {
-    "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
-    "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
-    "dengue": "https://www.who.int/news-room/fact-sheets/detail/dengue-and-severe-dengue",
-    "hiv": "https://www.who.int/news-room/fact-sheets/detail/hiv-aids",
-    "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
-}
-
-# -------------------
-# Fetch Helpers
-# -------------------
-def fetch_overview(url):
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and "overview" in tag.get_text(strip=True).lower())
-        if not heading:
-            return None
-        paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name=="p"]
-        return " ".join(paragraphs) if paragraphs else None
-    except:
-        return None
-
-def fetch_content(url, disease, keyword):
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and keyword in tag.get_text(strip=True).lower())
-        if not heading:
-            return None
-
-        points = []
-        for sib in heading.find_next_siblings():
-            if sib.name in ["h2","h3"]:
-                break
-            if sib.name == "ul":
-                points.extend([f"- {li.get_text(strip=True)}" for li in sib.find_all("li") if li.get_text(strip=True)])
-
-        if not points:
-            points = [f"- {sib.get_text(strip=True)}" for sib in heading.find_next_siblings() if sib.name=="p" and sib.get_text(strip=True)]
-
-        if points:
-            return f"The {keyword} of {disease.capitalize()} are:\n" + "\n".join(points)
-        return None
-    except Exception as e:
-        print(f"[DEBUG] fetch_content error ({keyword}): {e}")
-        return None
-
-# -------------------
-# Webhook Route
-# -------------------
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
         return "Webhook is live", 200
 
-    req = request.get_json()
-    print("[DEBUG] Incoming request:", req)
+    # Parse Dialogflow request
+    req = request.get_json(silent=True, force=True)
+    print("[DEBUG] Incoming request:", json.dumps(req, indent=2))  # log everything
 
-    intent_name = req["queryResult"]["intent"]["displayName"]
-    disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
+    # Extract intent + parameter
+    intent_name = req.get("queryResult", {}).get("intent", {}).get("displayName", "")
+    disease_param = req.get("queryResult", {}).get("parameters", {}).get("disease", "")
 
-    # Translate using original disease_param
-    disease_en = translate_to_english(disease_param)
-
-    url = DISEASE_OVERVIEWS.get(disease_en.lower())
-    response_text = "Sorry, I don't understand your request."
-
-    if not url:
-        response_text = f"Disease '{disease_en}' not found in database."
-    else:
-        if intent_name == "get_disease_overview":
-            overview = fetch_overview(url)
-            response_text = overview or f"Overview not found for {disease_param}."
-        elif intent_name == "get_symptoms":
-            response_text = fetch_content(url, disease_en, "symptoms") or f"Symptoms not found for {disease_param}."
-        elif intent_name == "get_treatment":
-            response_text = fetch_content(url, disease_en, "treatment") or f"Treatment not found for {disease_param}."
-        elif intent_name == "get_prevention":
-            response_text = fetch_content(url, disease_en, "prevention") or f"Prevention not found for {disease_param}."
+    # Debug response
+    response_text = f"I got intent '{intent_name}' with disease '{disease_param}'."
 
     return jsonify({"fulfillmentText": response_text})
 
-# -------------------
-# Run Server
-# -------------------
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
+
 
 
 
