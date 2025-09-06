@@ -711,30 +711,148 @@
 #     app.run(debug=True)
 
 from flask import Flask, request, jsonify
-import json
+import requests
+from bs4 import BeautifulSoup
+import os
+from langdetect import detect, DetectorFactory
+import time
 
+# -------------------
+# Setup
+# -------------------
+DetectorFactory.seed = 0
 app = Flask(__name__)
 
+# -------------------
+# Translate Indian language to English using LibreTranslate
+# -------------------
+def translate_to_english(disease_param):
+    if not disease_param.strip():
+        return disease_param
+
+    try:
+        detected_lang = detect(disease_param)
+        if detected_lang == "en":
+            return disease_param  # already English
+    except Exception as e:
+        print(f"[DEBUG] Language detection failed: {e}. Defaulting to 'hi'.")
+        detected_lang = "hi"
+
+    payload = {
+        "q": disease_param,
+        "source": detected_lang,
+        "target": "en",
+        "format": "text"
+    }
+
+    try:
+        response = requests.post(
+            "https://libretranslate.com/translate",
+            headers={"Content-Type": "application/json"},
+            json=payload,
+            timeout=15
+        )
+        response.raise_for_status()
+        result = response.json()
+        translated = result.get("translatedText", disease_param)
+        print(f"[DEBUG] LibreTranslate translated: {translated}")
+        return translated
+    except Exception as e:
+        print(f"[DEBUG] LibreTranslate failed: {e}")
+        return disease_param
+
+# -------------------
+# Disease URLs
+# -------------------
+DISEASE_OVERVIEWS = {
+    "malaria": "https://www.who.int/news-room/fact-sheets/detail/malaria",
+    "influenza": "https://www.who.int/news-room/fact-sheets/detail/influenza-(seasonal)",
+    "dengue": "https://www.who.int/news-room/fact-sheets/detail/dengue-and-severe-dengue",
+    "hiv": "https://www.who.int/news-room/fact-sheets/detail/hiv-aids",
+    "tuberculosis": "https://www.who.int/news-room/fact-sheets/detail/tuberculosis",
+}
+
+# -------------------
+# Fetch Helpers
+# -------------------
+def fetch_overview(url):
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and "overview" in tag.get_text(strip=True).lower())
+        if not heading:
+            return None
+        paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name == "p"]
+        return " ".join(paragraphs) if paragraphs else None
+    except:
+        return None
+
+def fetch_content(url, disease, keyword):
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and keyword in tag.get_text(strip=True).lower())
+        if not heading:
+            return None
+
+        points = []
+        for sib in heading.find_next_siblings():
+            if sib.name in ["h2","h3"]:
+                break
+            if sib.name == "ul":
+                points.extend([f"- {li.get_text(strip=True)}" for li in sib.find_all("li") if li.get_text(strip=True)])
+        if not points:
+            points = [f"- {sib.get_text(strip=True)}" for sib in heading.find_next_siblings() if sib.name == "p" and sib.get_text(strip=True)]
+
+        if points:
+            return f"The {keyword} of {disease.capitalize()} are:\n" + "\n".join(points)
+        return None
+    except Exception as e:
+        print(f"[DEBUG] fetch_content error ({keyword}): {e}")
+        return None
+
+# -------------------
+# Webhook Route
+# -------------------
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
         return "Webhook is live", 200
 
-    # Parse Dialogflow request
-    req = request.get_json(silent=True, force=True)
-    print("[DEBUG] Incoming request:", json.dumps(req, indent=2))  # log everything
+    req = request.get_json()
+    print("[DEBUG] Incoming request:", req)
 
-    # Extract intent + parameter
-    intent_name = req.get("queryResult", {}).get("intent", {}).get("displayName", "")
-    disease_param = req.get("queryResult", {}).get("parameters", {}).get("disease", "")
+    intent_name = req["queryResult"]["intent"]["displayName"]
+    disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # Debug response
-    response_text = f"I got intent '{intent_name}' with disease '{disease_param}'."
+    # Translate input disease to English
+    disease_en = translate_to_english(disease_param)
+
+    url = DISEASE_OVERVIEWS.get(disease_en.lower())
+    response_text = "Sorry, I don't understand your request."
+
+    if not url:
+        response_text = f"Disease '{disease_en}' not found in database."
+    else:
+        if intent_name == "get_disease_overview":
+            overview = fetch_overview(url)
+            response_text = overview or f"Overview not found for {disease_param}."
+        elif intent_name == "get_symptoms":
+            response_text = fetch_content(url, disease_en, "symptoms") or f"Symptoms not found for {disease_param}."
+        elif intent_name == "get_treatment":
+            response_text = fetch_content(url, disease_en, "treatment") or f"Treatment not found for {disease_param}."
+        elif intent_name == "get_prevention":
+            response_text = fetch_content(url, disease_en, "prevention") or f"Prevention not found for {disease_param}."
 
     return jsonify({"fulfillmentText": response_text})
 
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+# -------------------
+# Run Server
+# -------------------
+if __name__ == '__main__':
+    app.run(debug=True)
 
 
 
