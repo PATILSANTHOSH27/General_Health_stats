@@ -818,12 +818,7 @@ def fetch_content(url, disease, keyword):
 # -------------------
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
-    if request.method == 'GET':
-        return "Webhook is live", 200
-
-    req = request.get_json()
-    print("[DEBUG] Incoming request:", req)
-
+   
     intent_name = req["queryResult"]["intent"]["displayName"]
     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
