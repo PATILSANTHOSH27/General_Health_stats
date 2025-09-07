@@ -715,7 +715,6 @@ import requests
 from bs4 import BeautifulSoup
 import os
 from langdetect import detect, DetectorFactory
-import time
 import json
 
 # -------------------
@@ -723,26 +722,6 @@ import json
 # -------------------
 DetectorFactory.seed = 0
 app = Flask(__name__)
-
-# -------------------
-# LibreTranslate Settings
-# -------------------
-LIBRETRANSLATE_URL = "https://libretranslate.com/translate"
-
-# -------------------
-# Supported Indian Languages for langdetect mapping
-# -------------------
-LANGDETECT_TO_LIBRE = {
-    "te": "te",  # Telugu
-    "hi": "hi",  # Hindi
-    "en": "en",  # English
-    "mr": "mr",  # Marathi
-    "ta": "ta",  # Tamil
-    "kn": "kn",  # Kannada
-    "ml": "ml",  # Malayalam
-    "bn": "bn",  # Bengali
-    "gu": "gu",  # Gujarati
-}
 
 # -------------------
 # Disease URLs
@@ -756,50 +735,39 @@ DISEASE_OVERVIEWS = {
 }
 
 # -------------------
-# Service Account Access Token
+# MyMemory Translation
 # -------------------
-from google.oauth2 import service_account
-import google.auth.transport.requests
-
-def get_access_token():
-    service_account_info = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"))
-    credentials = service_account.Credentials.from_service_account_info(
-        service_account_info,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-    request = google.auth.transport.requests.Request()
-    credentials.refresh(request)
-    return credentials.token
-
-# -------------------
-# Translation Function
-# -------------------
-def translate_to_english(disease_param):
+def translate_with_mymemory(disease_param, source_lang, target_lang="en"):
+    """Translate disease_param using MyMemory public API."""
     if not disease_param.strip():
         return disease_param
+    
+    try:
+        api_url = "https://api.mymemory.translated.net/get"  # fixed API endpoint
+        params = {
+            "q": disease_param, 
+            "langpair": f"{source_lang}|{target_lang}"
+        }
+        response = requests.get(api_url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return data["responseData"]["translatedText"]
+    except Exception:
+        return disease_param
 
+
+def translate_to_english(disease_param):
+    """Detect language and translate disease_param to English."""
     try:
         detected_lang = detect(disease_param)
-        src_lang = LANGDETECT_TO_LIBRE.get(detected_lang, "hi")  # default Hindi
     except Exception:
-        src_lang = "hi"
+        detected_lang = "en"
 
-    if src_lang == "en":
+    if detected_lang == "en":
         return disease_param
 
-    try:
-        payload = {
-            "q": disease_param,
-            "source": src_lang,
-            "target": "en",
-            "format": "text"
-        }
-        response = requests.post(LIBRETRANSLATE_URL, data=payload, timeout=20)
-        response.raise_for_status()
-        translated = response.json().get("translatedText", disease_param)
-        return translated
-    except Exception:
-        return disease_param
+    translated_disease = translate_with_mymemory(disease_param, detected_lang, "en")
+    return translated_disease
 
 # -------------------
 # Fetch Helpers
@@ -809,32 +777,33 @@ def fetch_overview(url):
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and "overview" in tag.get_text(strip=True).lower())
+        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and "overview" in tag.get_text(strip=True).lower())
         if not heading:
             return None
-        paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name=="p"]
+        paragraphs = [sib.get_text(strip=True) for sib in heading.find_next_siblings() if sib.name == "p"]
         return " ".join(paragraphs) if paragraphs else None
     except:
         return None
 
-def fetch_content(url, disease, keyword):
+
+def fetch_content(url, disease_param, keyword):
     try:
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        heading = soup.find(lambda tag: tag.name in ["h2","h3"] and keyword in tag.get_text(strip=True).lower())
+        heading = soup.find(lambda tag: tag.name in ["h2", "h3"] and keyword in tag.get_text(strip=True).lower())
         if not heading:
             return None
         points = []
         for sib in heading.find_next_siblings():
-            if sib.name in ["h2","h3"]:
+            if sib.name in ["h2", "h3"]:
                 break
             if sib.name == "ul":
                 points.extend([f"- {li.get_text(strip=True)}" for li in sib.find_all("li") if li.get_text(strip=True)])
         if not points:
-            points = [f"- {sib.get_text(strip=True)}" for sib in heading.find_next_siblings() if sib.name=="p" and sib.get_text(strip=True)]
+            points = [f"- {sib.get_text(strip=True)}" for sib in heading.find_next_siblings() if sib.name == "p" and sib.get_text(strip=True)]
         if points:
-            return f"The {keyword} of {disease.capitalize()} are:\n" + "\n".join(points)
+            return f"The {keyword} of {disease_param.capitalize()} are:\n" + "\n".join(points)
         return None
     except:
         return None
@@ -848,7 +817,7 @@ def webhook():
     intent_name = req["queryResult"]["intent"]["displayName"]
     disease_param = req["queryResult"].get("parameters", {}).get("disease", "")
 
-    # Translate any Indian language input to English
+    # Translate disease_param to English (only once)
     disease_en = translate_to_english(disease_param)
 
     url = DISEASE_OVERVIEWS.get(disease_en.lower())
@@ -859,13 +828,13 @@ def webhook():
     else:
         if intent_name == "get_disease_overview":
             overview = fetch_overview(url)
-            response_text = overview or f"Overview not found for {disease_param}."
+            response_text = overview or f"Overview not found for {disease_en}."
         elif intent_name == "get_symptoms":
-            response_text = fetch_content(url, disease_en, "symptoms") or f"Symptoms not found for {disease_param}."
+            response_text = fetch_content(url, disease_en, "symptoms") or f"Symptoms not found for {disease_en}."
         elif intent_name == "get_treatment":
-            response_text = fetch_content(url, disease_en, "treatment") or f"Treatment not found for {disease_param}."
+            response_text = fetch_content(url, disease_en, "treatment") or f"Treatment not found for {disease_en}."
         elif intent_name == "get_prevention":
-            response_text = fetch_content(url, disease_en, "prevention") or f"Prevention not found for {disease_param}."
+            response_text = fetch_content(url, disease_en, "prevention") or f"Prevention not found for {disease_en}."
 
     return jsonify({"fulfillmentText": response_text})
 
@@ -874,6 +843,7 @@ def webhook():
 # -------------------
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
