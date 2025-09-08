@@ -267,21 +267,24 @@ def get_who_outbreak_data():
 def webhook():
     req = request.get_json()
     intent_name = req["queryResult"]["intent"]["displayName"]
-    params = req["queryResult"].get("parameters", {})
-    disease_input = params.get("disease", "").strip()
 
-    # ✅ Detect user input language once
+    # ✅ Handle both "disease" and "sa" parameters safely
+    params = req["queryResult"].get("parameters", {})
+    disease_input = params.get("disease") or params.get("sa") or ""
+    disease_input = disease_input.strip()
+
+    # ✅ Detect user language
     try:
         user_lang = detect(disease_input) if disease_input else "en"
     except Exception:
         user_lang = "en"
 
-    # ✅ Translate disease_param into English first
+    # ✅ Translate to English for lookup
     disease_param = translate_to_english(disease_input).lower()
 
     response_text = "Sorry, I don't understand your request."
 
-    if intent_name == "get_disease_overview":
+    if intent_name in ["get_disease_overview", "disease"]:  # 👈 covers both intent names
         url = DISEASE_OVERVIEWS.get(disease_param)
         if url:
             overview = fetch_overview(url)
@@ -319,6 +322,11 @@ def webhook():
             response_text = "⚠️ Unable to fetch outbreak data right now."
         else:
             response_text = "🌍 Latest WHO Outbreak News:\n\n" + "\n\n".join(outbreaks)
+
+    # ✅ Translate final response back to user language
+    response_text = translate_from_english(response_text, user_lang)
+
+    return jsonify({"fulfillmentText": response_text})
 
     # ✅ Translate final response back to user’s language
     response_text = translate_from_english(response_text, user_lang)
